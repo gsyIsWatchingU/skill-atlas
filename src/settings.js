@@ -1,4 +1,5 @@
 const MAX_CUSTOM_DESCRIPTION_LENGTH = 300;
+const { getChineseDescription } = require('./chinese-descriptions');
 
 function normalizeSettings(value = {}) {
   const customDescriptions = {};
@@ -23,7 +24,8 @@ function attachCustomDescriptions(result, customDescriptions = {}) {
     ...result,
     skills: result.skills.map((skill) => ({
       ...skill,
-      customDescription: customDescriptions[skill.id] || ''
+      customDescription: customDescriptions[skill.id] || '',
+      localizedDescription: getChineseDescription(skill.name)
     }))
   };
 }

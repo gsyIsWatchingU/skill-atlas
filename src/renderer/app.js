@@ -57,7 +57,7 @@ function showToast(message) {
 }
 
 function getDisplayDescription(skill) {
-  return skill.customDescription || skill.description || '暂无简介';
+  return skill.customDescription || skill.localizedDescription || skill.description || '暂无简介';
 }
 
 function getFilteredSkills() {
@@ -68,7 +68,7 @@ function getFilteredSkills() {
     if (!['all', 'duplicate', 'invalid'].includes(state.platform) && skill.platform !== state.platform) return false;
     if (state.scope !== 'all' && skill.scope !== state.scope) return false;
     if (!query) return true;
-    return [skill.name, skill.customDescription, skill.description, skill.path, skill.source]
+    return [skill.name, skill.customDescription, skill.localizedDescription, skill.description, skill.path, skill.source]
       .join(' ')
       .toLocaleLowerCase('zh-CN')
       .includes(query);
@@ -156,7 +156,9 @@ function renderGrid() {
         <div class="card-badges">
           <span class="platform-pill ${escapeHtml(skill.platform)}">${escapeHtml(platformNames[skill.platform])}</span>
           <span class="scope-pill">${escapeHtml(skill.scope)}</span>
-          ${skill.customDescription ? '<span class="custom-pill">中文简介</span>' : ''}
+          ${skill.customDescription
+            ? '<span class="custom-pill custom">自定义简介</span>'
+            : skill.localizedDescription ? '<span class="custom-pill">中文简介</span>' : ''}
           ${skill.duplicate ? '<span class="warning-pill">重名</span>' : ''}
           ${skill.valid ? '' : '<span class="warning-pill">缺元数据</span>'}
         </div>
@@ -187,7 +189,9 @@ function openDetail(skill) {
   $('#detail-avatar').style.setProperty('--platform-color', skill.platform === 'trae' ? '#45d4c5' : skill.platform === 'shared' ? '#6795ff' : '#ff8b3d');
   $('#detail-name').textContent = skill.name;
   $('#detail-description').textContent = getDisplayDescription(skill);
-  $('#detail-description-label').textContent = skill.customDescription ? '自定义中文简介' : '原始简介';
+  $('#detail-description-label').textContent = skill.customDescription
+    ? '自定义中文简介'
+    : skill.localizedDescription ? '中文简介' : '原始简介';
   $('#detail-source').textContent = skill.source;
   $('#detail-modified').textContent = formatDate(skill.modifiedAt, true);
   $('#detail-resources').textContent = `${skill.resourceDirectories} 个目录 · ${skill.resourceFiles} 个文件`;

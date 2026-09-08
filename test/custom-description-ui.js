@@ -10,6 +10,7 @@ function createResult() {
       id: 'review-agent',
       name: 'review-agent',
       description: 'Review code changes and report actionable findings.',
+      localizedDescription: '审查代码变更并报告可操作问题。',
       customDescription: savedDescription,
       body: '# Review agent\nReview the requested changes.',
       platform: 'codex',
@@ -65,6 +66,12 @@ app.whenReady().then(async () => {
       const wait = () => document.querySelector('.skill-card') ? resolve() : setTimeout(wait, 20);
       wait();
     })`);
+    const initialDescription = await window.webContents.executeJavaScript(
+      `document.querySelector('.skill-card p').textContent`
+    );
+    if (initialDescription !== '审查代码变更并报告可操作问题。') {
+      throw new Error('未优先展示内置中文简介');
+    }
     await window.webContents.executeJavaScript(`(() => {
       document.querySelector('.skill-card').click();
       document.querySelector('#edit-description').click();
@@ -79,7 +86,7 @@ app.whenReady().then(async () => {
         const cardText = document.querySelector('.skill-card p')?.textContent;
         const detailText = document.querySelector('#detail-description')?.textContent;
         const badge = document.querySelector('.custom-pill')?.textContent;
-        if (cardText === ${JSON.stringify(customDescription)} && detailText === ${JSON.stringify(customDescription)} && badge === '中文简介') return resolve();
+        if (cardText === ${JSON.stringify(customDescription)} && detailText === ${JSON.stringify(customDescription)} && badge === '自定义简介') return resolve();
         if (attempts++ > 100) return reject(new Error('中文简介未正确展示'));
         setTimeout(wait, 20);
       };
@@ -97,7 +104,10 @@ app.whenReady().then(async () => {
     if (cancelState.dialogOpen || cancelState.detailText !== customDescription || savedDescription !== customDescription) {
       throw new Error('取消编辑时不应修改中文简介');
     }
-    console.log('自定义中文简介界面验收通过');
+    console.log('内置与自定义中文简介界面验收通过');
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
   } finally {
     app.quit();
   }

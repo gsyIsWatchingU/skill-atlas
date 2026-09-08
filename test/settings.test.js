@@ -21,10 +21,11 @@ test('保存、展示和清除自定义中文简介', () => {
   assert.equal(saved.description, '自定义中文简介');
 
   const result = attachCustomDescriptions(
-    { skills: [{ id: 'skill-id', description: 'English description' }] },
+    { skills: [{ id: 'skill-id', name: 'review-agent', description: 'English description' }] },
     saved.settings.customDescriptions
   );
   assert.equal(result.skills[0].customDescription, '自定义中文简介');
+  assert.match(result.skills[0].localizedDescription, /代码变更/);
 
   const cleared = updateCustomDescription(saved.settings, 'skill-id', '');
   assert.equal(cleared.description, '');
