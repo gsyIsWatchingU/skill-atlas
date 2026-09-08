@@ -1,0 +1,42 @@
+{
+  "name": "skill-atlas",
+  "version": "1.0.0",
+  "description": "集中查看和管理 Codex、Trae 与共享 Agent Skills 的桌面应用",
+  "main": "src/main.js",
+  "author": "Skill Atlas",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/skill-scanner.test.js",
+    "pack": "electron-builder --win portable",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "^37.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.skillatlas.desktop",
+    "productName": "Skill Atlas",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "outputs"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Skill Atlas"
+    }
+  }
+}
