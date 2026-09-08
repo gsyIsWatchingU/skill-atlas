@@ -56,6 +56,10 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 1800);
 }
 
+function getDisplayDescription(skill) {
+  return skill.customDescription || skill.description || '暂无简介';
+}
+
 function getFilteredSkills() {
   const query = state.search.trim().toLocaleLowerCase('zh-CN');
   let list = state.result.skills.filter((skill) => {
@@ -64,7 +68,7 @@ function getFilteredSkills() {
     if (!['all', 'duplicate', 'invalid'].includes(state.platform) && skill.platform !== state.platform) return false;
     if (state.scope !== 'all' && skill.scope !== state.scope) return false;
     if (!query) return true;
-    return [skill.name, skill.description, skill.path, skill.source]
+    return [skill.name, skill.customDescription, skill.description, skill.path, skill.source]
       .join(' ')
       .toLocaleLowerCase('zh-CN')
       .includes(query);
@@ -152,12 +156,13 @@ function renderGrid() {
         <div class="card-badges">
           <span class="platform-pill ${escapeHtml(skill.platform)}">${escapeHtml(platformNames[skill.platform])}</span>
           <span class="scope-pill">${escapeHtml(skill.scope)}</span>
+          ${skill.customDescription ? '<span class="custom-pill">中文简介</span>' : ''}
           ${skill.duplicate ? '<span class="warning-pill">重名</span>' : ''}
           ${skill.valid ? '' : '<span class="warning-pill">缺元数据</span>'}
         </div>
       </div>
       <h3>${escapeHtml(skill.name)}</h3>
-      <p>${escapeHtml(skill.description)}</p>
+      <p>${escapeHtml(getDisplayDescription(skill))}</p>
       <div class="card-footer">
         <span title="${escapeHtml(skill.source)}">${escapeHtml(skill.source)}</span>
         <span>${formatDate(skill.modifiedAt)}</span>
@@ -181,7 +186,8 @@ function openDetail(skill) {
   $('#detail-avatar').textContent = initials(skill.name);
   $('#detail-avatar').style.setProperty('--platform-color', skill.platform === 'trae' ? '#45d4c5' : skill.platform === 'shared' ? '#6795ff' : '#ff8b3d');
   $('#detail-name').textContent = skill.name;
-  $('#detail-description').textContent = skill.description;
+  $('#detail-description').textContent = getDisplayDescription(skill);
+  $('#detail-description-label').textContent = skill.customDescription ? '自定义中文简介' : '原始简介';
   $('#detail-source').textContent = skill.source;
   $('#detail-modified').textContent = formatDate(skill.modifiedAt, true);
   $('#detail-resources').textContent = `${skill.resourceDirectories} 个目录 · ${skill.resourceFiles} 个文件`;
@@ -198,6 +204,31 @@ function openDetail(skill) {
   $('#detail-overlay').classList.remove('hidden');
   $('#detail-panel').classList.add('open');
   $('#detail-panel').setAttribute('aria-hidden', 'false');
+}
+
+function updateDescriptionCounter() {
+  $('#description-count').textContent = `${$('#description-input').value.length} / 300`;
+}
+
+function openDescriptionDialog() {
+  if (!state.selected) return;
+  $('#description-input').value = state.selected.customDescription || '';
+  $('#description-original').textContent = `原始简介：${state.selected.description || '暂无描述'}`;
+  $('#clear-description').classList.toggle('hidden', !state.selected.customDescription);
+  updateDescriptionCounter();
+  $('#description-dialog').showModal();
+  $('#description-input').focus();
+}
+
+async function saveSelectedDescription(description) {
+  if (!state.selected) return;
+  const skill = state.result.skills.find((item) => item.id === state.selected.id);
+  if (!skill) return;
+  const savedDescription = await window.skillAtlas.saveDescription(skill.id, description);
+  skill.customDescription = savedDescription;
+  state.selected = skill;
+  renderGrid();
+  openDetail(skill);
 }
 
 function closeDetail() {
@@ -274,6 +305,33 @@ $('#copy-path').addEventListener('click', async () => {
   await window.skillAtlas.copyText(state.selected.filePath);
   showToast('路径已复制');
 });
+$('#edit-description').addEventListener('click', openDescriptionDialog);
+$('#description-input').addEventListener('input', updateDescriptionCounter);
+$('#description-form').addEventListener('submit', async (event) => {
+  if (event.submitter?.value === 'cancel') return;
+  event.preventDefault();
+  const description = $('#description-input').value.trim();
+  if (!description) {
+    showToast('请输入中文简介，或使用“恢复原简介”');
+    return;
+  }
+  try {
+    await saveSelectedDescription(description);
+    $('#description-dialog').close();
+    showToast('中文简介已保存');
+  } catch (error) {
+    showToast(`保存失败：${error.message}`);
+  }
+});
+$('#clear-description').addEventListener('click', async () => {
+  try {
+    await saveSelectedDescription('');
+    $('#description-dialog').close();
+    showToast('已恢复原始简介');
+  } catch (error) {
+    showToast(`恢复失败：${error.message}`);
+  }
+});
 $('#export').addEventListener('click', async () => {
   const payload = {
     exportedAt: new Date().toISOString(),
@@ -289,7 +347,7 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     $('#search').focus();
   }
-  if (event.key === 'Escape' && state.selected) closeDetail();
+  if (event.key === 'Escape' && state.selected && !$('#description-dialog').open) closeDetail();
 });
 
 scan();

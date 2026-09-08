@@ -133,7 +133,14 @@
       <div class="detail-content">
         <div class="detail-identity">
           <div id="detail-avatar" class="skill-avatar">S</div>
-          <div><h2 id="detail-name"></h2><p id="detail-description"></p></div>
+          <div class="detail-heading">
+            <h2 id="detail-name"></h2>
+            <div class="description-heading">
+              <span id="detail-description-label">原始简介</span>
+              <button id="edit-description" class="text-button" type="button">编辑中文简介</button>
+            </div>
+            <p id="detail-description"></p>
+          </div>
         </div>
         <div id="detail-alert" class="detail-alert hidden"></div>
         <div class="detail-actions">
@@ -170,6 +177,27 @@
         <div class="dialog-actions">
           <button value="cancel" class="button ghost">取消</button>
           <button id="choose-root" value="default" class="button primary">选择目录</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="description-dialog">
+      <form id="description-form" method="dialog">
+        <div class="dialog-mark">译</div>
+        <h2>编辑中文简介</h2>
+        <p>写一段便于快速理解和搜索的中文说明，保存后将在卡片和详情中优先展示。</p>
+        <label>中文简介
+          <textarea id="description-input" maxlength="300" rows="5" placeholder="例如：扫描代码变更并给出按优先级排序的审查建议。"></textarea>
+        </label>
+        <div class="description-hint">
+          <small id="description-original"></small>
+          <span id="description-count">0 / 300</span>
+        </div>
+        <div class="dialog-actions split">
+          <button id="clear-description" type="button" class="button ghost hidden">恢复原简介</button>
+          <span></span>
+          <button value="cancel" class="button ghost">取消</button>
+          <button type="submit" class="button primary">保存</button>
         </div>
       </form>
     </dialog>

@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/skill-scanner.test.js",
+    "test": "node --test test/skill-scanner.test.js test/settings.test.js",
+    "test:ui": "electron test/custom-description-ui.js",
     "pack": "electron-builder --win portable",
     "dist": "electron-builder --win nsis portable"
   },

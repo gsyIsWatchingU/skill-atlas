@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('elect
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { getDefaultRoots, scanSkills } = require('./skill-scanner');
+const { attachCustomDescriptions, normalizeSettings, updateCustomDescription } = require('./settings');
 
 let mainWindow;
 
@@ -12,9 +13,9 @@ function settingsPath() {
 async function readSettings() {
   try {
     const value = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
-    return { customRoots: Array.isArray(value.customRoots) ? value.customRoots : [] };
+    return normalizeSettings(value);
   } catch {
-    return { customRoots: [] };
+    return normalizeSettings();
   }
 }
 
@@ -58,7 +59,15 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('skills:scan', async () => {
   const settings = await readSettings();
-  return scanSkills([...getDefaultRoots(), ...settings.customRoots]);
+  const result = await scanSkills([...getDefaultRoots(), ...settings.customRoots]);
+  return attachCustomDescriptions(result, settings.customDescriptions);
+});
+
+ipcMain.handle('skills:description:set', async (_event, payload = {}) => {
+  const currentSettings = await readSettings();
+  const result = updateCustomDescription(currentSettings, payload.id, payload.description);
+  await writeSettings(result.settings);
+  return result.description;
 });
 
 ipcMain.handle('roots:add', async (_event, platform) => {
