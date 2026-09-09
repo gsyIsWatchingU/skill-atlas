@@ -1,0 +1,85 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $expectedTag = "v$packageVersion"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $packageVersion. Expected $expectedTag."
+          }
+
+      - name: Build installers
+        run: npm run dist
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-atlas-windows
+          path: |
+            outputs/*.exe
+            outputs/*.exe.blockmap
+            outputs/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release and upload assets
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --generate-notes --verify-tag
+          }
+
+          $assets = @(
+            Get-ChildItem outputs -File -Filter '*.exe'
+            Get-ChildItem outputs -File -Filter '*.exe.blockmap'
+            Get-Item outputs/latest.yml -ErrorAction SilentlyContinue
+          )
+
+          if (-not $assets) {
+            throw 'No release assets were generated.'
+          }
+
+          foreach ($asset in $assets) {
+            gh release upload $env:GITHUB_REF_NAME $asset.FullName --clobber
+          }

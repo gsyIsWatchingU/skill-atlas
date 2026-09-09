@@ -2,9 +2,14 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('elect
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { getDefaultRoots, scanSkills } = require('./skill-scanner');
+const { scanCodexUsage } = require('./usage-scanner');
 const { attachCustomDescriptions, normalizeSettings, updateCustomDescription } = require('./settings');
 
 let mainWindow;
+const electronmonRestartCode = Number(process.env.ELECTRONMON_SPECIAL_SIGNAL || 37);
+
+// 避免同一路径覆盖安装或打包后，Chromium 继续使用旧版界面脚本。
+app.commandLine.appendSwitch('disable-http-cache');
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -57,10 +62,42 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('quit', (_event, exitCode) => {
+  const hiddenDevelopment = process.env.SKILL_ATLAS_HIDDEN_DEV === '1';
+  if (!hiddenDevelopment || exitCode === electronmonRestartCode || !process.ppid) return;
+  try {
+    process.kill(process.ppid, 'SIGTERM');
+  } catch {
+    // 后台监听器已退出时无需处理。
+  }
+});
+
+ipcMain.handle('app:version', () => app.getVersion());
+
+ipcMain.handle('app:reload-ui', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || window.isDestroyed()) return false;
+  window.webContents.reloadIgnoringCache();
+  return true;
+});
+
 ipcMain.handle('skills:scan', async () => {
   const settings = await readSettings();
   const result = await scanSkills([...getDefaultRoots(), ...settings.customRoots]);
-  return attachCustomDescriptions(result, settings.customDescriptions);
+  const localized = attachCustomDescriptions(result, settings.customDescriptions);
+  const usage = await scanCodexUsage(localized.skills, {
+    cachePath: path.join(app.getPath('userData'), 'usage-index.json')
+  });
+  return {
+    ...localized,
+    skills: usage.skills,
+    usage: {
+      summary: usage.summary,
+      daily: usage.daily,
+      topSkills: usage.topSkills,
+      meta: usage.meta
+    }
+  };
 });
 
 ipcMain.handle('skills:description:set', async (_event, payload = {}) => {

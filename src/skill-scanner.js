@@ -156,12 +156,32 @@ async function countResources(skillDirectory) {
   return { fileCount, directoryCount };
 }
 
+function classifySkillOwnership(skillFile, root) {
+  const relativeParts = path.relative(root.rootPath, skillFile)
+    .split(path.sep)
+    .filter(Boolean)
+    .map((part) => part.toLowerCase());
+  const firstDirectory = relativeParts[0] || '';
+  const isCodexSystemSkill = root.id === 'codex-user' && firstDirectory === '.system';
+  const isBundledPluginSkill = root.id === 'codex-plugins' && [
+    'openai-bundled',
+    'openai-primary-runtime'
+  ].includes(firstDirectory);
+  const isSystem = root.skillOwnership === 'system' || isCodexSystemSkill || isBundledPluginSkill;
+
+  return {
+    ownership: isSystem ? 'system' : 'personal',
+    ownershipLabel: isSystem ? 'Codex 自带' : '个人 / 下载'
+  };
+}
+
 async function readSkill(skillFile, root) {
   const stat = await fs.stat(skillFile);
   const content = await fs.readFile(skillFile, 'utf8');
   const skillDirectory = path.dirname(skillFile);
   const metadata = parseFrontmatter(content, path.basename(skillDirectory));
   const resources = await countResources(skillDirectory);
+  const ownership = classifySkillOwnership(skillFile, root);
   return {
     id: Buffer.from(skillFile.toLowerCase()).toString('base64url'),
     name: metadata.name,
@@ -171,6 +191,7 @@ async function readSkill(skillFile, root) {
     scope: root.scope || '自定义',
     source: root.label,
     rootId: root.id,
+    ...ownership,
     path: skillDirectory,
     filePath: skillFile,
     modifiedAt: stat.mtime.toISOString(),

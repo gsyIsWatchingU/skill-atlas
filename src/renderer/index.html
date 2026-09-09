@@ -16,13 +16,16 @@
           </div>
           <div>
             <strong>Skill Atlas</strong>
-            <small>智能体技能地图</small>
+            <small>智能体技能地图 · <span id="app-version">v—</span></small>
           </div>
         </div>
 
         <nav class="nav" aria-label="技能来源">
           <button class="nav-item active" data-platform="all">
             <span class="nav-icon">⌘</span><span>全部技能</span><b id="count-all">0</b>
+          </button>
+          <button class="nav-item" data-view="usage">
+            <span class="nav-icon">↗</span><span>使用分析</span><b id="count-used">0</b>
           </button>
           <button class="nav-item" data-platform="codex">
             <span class="source-dot codex"></span><span>Codex</span><b id="count-codex">0</b>
@@ -56,7 +59,7 @@
         <header class="topbar">
           <div class="page-title">
             <p>工作台 / <span id="breadcrumb">全部技能</span></p>
-            <h1>技能总览</h1>
+            <h1 id="page-heading">技能总览</h1>
           </div>
           <div class="top-actions">
             <label class="search-box">
@@ -65,61 +68,109 @@
               <kbd>Ctrl K</kbd>
             </label>
             <button id="export" class="button ghost">导出清单</button>
+            <button id="reload-ui" class="button ghost reload-button" title="重新加载界面" aria-label="重新加载界面">↺</button>
             <button id="refresh" class="button primary"><span>↻</span>重新扫描</button>
           </div>
         </header>
 
-        <section class="summary-grid" aria-label="统计摘要">
-          <article class="summary-card total">
-            <div class="metric-icon">S</div>
-            <div><span>已发现技能</span><strong id="metric-total">0</strong><small id="metric-roots">0 个有效目录</small></div>
-          </article>
-          <article class="summary-card">
-            <div class="metric-icon codex-icon">C</div>
-            <div><span>Codex</span><strong id="metric-codex">0</strong><small>用户与插件技能</small></div>
-          </article>
-          <article class="summary-card">
-            <div class="metric-icon trae-icon">T</div>
-            <div><span>Trae</span><strong id="metric-trae">0</strong><small>全局与项目技能</small></div>
-          </article>
-          <article class="summary-card">
-            <div class="metric-icon health-icon">✓</div>
-            <div><span>元数据完整度</span><strong id="metric-health">0%</strong><small id="metric-issues">0 个待完善</small></div>
-          </article>
-        </section>
+        <div id="catalog-view">
+          <section class="summary-grid" aria-label="统计摘要">
+            <article class="summary-card total">
+              <div class="metric-icon">S</div>
+              <div><span>已发现技能</span><strong id="metric-total">0</strong><small id="metric-roots">0 个有效目录</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon codex-icon">C</div>
+              <div><span>Codex</span><strong id="metric-codex">0</strong><small>用户与插件技能</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon trae-icon">T</div>
+              <div><span>Trae</span><strong id="metric-trae">0</strong><small>全局与项目技能</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon health-icon">✓</div>
+              <div><span>元数据完整度</span><strong id="metric-health">0%</strong><small id="metric-issues">0 个待完善</small></div>
+            </article>
+          </section>
 
-        <section class="content-panel">
-          <div class="list-toolbar">
-            <div>
-              <h2 id="list-title">全部技能</h2>
-              <p id="list-subtitle">集中查看每个技能的来源、范围与说明</p>
+          <section class="content-panel">
+            <div class="list-toolbar">
+              <div>
+                <h2 id="list-title">全部技能</h2>
+                <p id="list-subtitle">集中查看每个技能的来源、范围与说明</p>
+              </div>
+              <div class="toolbar-controls">
+                <label>范围
+                  <select id="scope-filter"><option value="all">全部</option></select>
+                </label>
+                <label>排序
+                  <select id="sort-order">
+                    <option value="name">名称</option>
+                    <option value="usage">使用频率</option>
+                    <option value="modified">最近更新</option>
+                    <option value="source">来源</option>
+                  </select>
+                </label>
+              </div>
             </div>
-            <div class="toolbar-controls">
-              <label>范围
-                <select id="scope-filter"><option value="all">全部</option></select>
-              </label>
-              <label>排序
-                <select id="sort-order">
-                  <option value="name">名称</option>
-                  <option value="modified">最近更新</option>
-                  <option value="source">来源</option>
-                </select>
-              </label>
+
+            <div id="loading" class="loading-state">
+              <div class="scanner"><i></i></div>
+              <strong>正在绘制技能地图</strong>
+              <span>扫描 Codex、Trae、共享目录与本地会话…</span>
             </div>
+            <div id="empty" class="empty-state hidden">
+              <div class="empty-symbol">⌁</div>
+              <h3>这里还没有 Skill</h3>
+              <p>添加一个扫描目录，或调整当前筛选条件。</p>
+              <button id="empty-add" class="button primary">添加扫描目录</button>
+            </div>
+            <div id="skill-grid" class="skill-grid hidden"></div>
+          </section>
+        </div>
+
+        <section id="usage-view" class="usage-view hidden" aria-label="Skill 使用分析">
+          <div class="summary-grid usage-summary">
+            <article class="summary-card total">
+              <div class="metric-icon">↗</div>
+              <div><span>累计使用</span><strong id="metric-usage-total">0</strong><small>实际加载 Skill 指令</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon codex-icon">30</div>
+              <div><span>近 30 天</span><strong id="metric-usage-30">0</strong><small id="usage-source-note">Codex 本地会话</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon trae-icon">✓</div>
+              <div><span>已使用技能</span><strong id="metric-usage-active">0</strong><small id="usage-active-rate">覆盖率 0%</small></div>
+            </article>
+            <article class="summary-card">
+              <div class="metric-icon health-icon">○</div>
+              <div><span>从未使用</span><strong id="metric-usage-unused">0</strong><small>可考虑检查或清理</small></div>
+            </article>
           </div>
 
-          <div id="loading" class="loading-state">
-            <div class="scanner"><i></i></div>
-            <strong>正在绘制技能地图</strong>
-            <span>扫描 Codex、Trae 与共享目录…</span>
+          <div class="analytics-grid">
+            <article class="analytics-card trend-card">
+              <div class="analytics-heading">
+                <div><h2>近 30 天趋势</h2><p>按本机日期统计实际加载次数</p></div>
+                <strong id="trend-total">0 次</strong>
+              </div>
+              <div id="usage-trend" class="usage-trend"></div>
+            </article>
+            <article class="analytics-card ranking-card">
+              <div class="analytics-heading">
+                <div><h2>高频 Skill</h2><p>累计使用次数 Top 10</p></div>
+              </div>
+              <div id="usage-ranking" class="usage-ranking"></div>
+            </article>
+            <article class="analytics-card unused-card">
+              <div class="analytics-heading">
+                <div><h2>从未使用</h2><p>已扫描但没有在本地 Codex 会话中加载</p></div>
+                <button id="show-unused" class="text-button" type="button">在总览中查看</button>
+              </div>
+              <div id="unused-skills" class="unused-skills"></div>
+            </article>
           </div>
-          <div id="empty" class="empty-state hidden">
-            <div class="empty-symbol">⌁</div>
-            <h3>这里还没有 Skill</h3>
-            <p>添加一个扫描目录，或调整当前筛选条件。</p>
-            <button id="empty-add" class="button primary">添加扫描目录</button>
-          </div>
-          <div id="skill-grid" class="skill-grid hidden"></div>
         </section>
       </main>
     </div>
@@ -127,7 +178,7 @@
     <div id="detail-overlay" class="overlay hidden"></div>
     <aside id="detail-panel" class="detail-panel" aria-hidden="true">
       <div class="detail-header">
-        <div><span id="detail-platform" class="platform-pill">Codex</span><span id="detail-scope" class="scope-pill">全局</span></div>
+        <div><span id="detail-platform" class="platform-pill">Codex</span><span id="detail-scope" class="scope-pill">全局</span><span id="detail-ownership" class="origin-pill personal">个人 / 下载</span></div>
         <button id="close-detail" class="icon-button" aria-label="关闭">×</button>
       </div>
       <div class="detail-content">
@@ -153,6 +204,8 @@
           <div><dt>更新时间</dt><dd id="detail-modified"></dd></div>
           <div><dt>资源</dt><dd id="detail-resources"></dd></div>
           <div><dt>文件大小</dt><dd id="detail-size"></dd></div>
+          <div><dt>使用次数</dt><dd id="detail-usage"></dd></div>
+          <div><dt>最近使用</dt><dd id="detail-last-used"></dd></div>
         </dl>
         <div class="path-block"><span>本地路径</span><code id="detail-path"></code></div>
         <div class="instructions">

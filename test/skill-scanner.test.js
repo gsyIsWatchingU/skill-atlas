@@ -29,3 +29,39 @@ test('扫描技能并标记重名与缺失元数据', async () => {
   assert.equal(result.skills.filter((skill) => skill.duplicate).length, 2);
   assert.equal(result.skills.filter((skill) => !skill.valid).length, 1);
 });
+
+test('按 Codex 目录标记自带与个人下载技能', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-atlas-origin-'));
+  const systemSkill = path.join(temp, '.system', 'skill-creator');
+  const personalSkill = path.join(temp, 'my-skill');
+  await Promise.all([systemSkill, personalSkill].map((directory) => fs.mkdir(directory, { recursive: true })));
+  await fs.writeFile(path.join(systemSkill, 'SKILL.md'), '---\nname: system-skill\ndescription: 系统技能\n---\n正文');
+  await fs.writeFile(path.join(personalSkill, 'SKILL.md'), '---\nname: personal-skill\ndescription: 个人技能\n---\n正文');
+
+  const result = await scanSkills([{
+    id: 'codex-user', platform: 'codex', scope: '全局', label: 'Codex 用户技能', rootPath: temp
+  }]);
+  const skills = Object.fromEntries(result.skills.map((skill) => [skill.name, skill]));
+
+  assert.equal(skills['system-skill'].ownership, 'system');
+  assert.equal(skills['system-skill'].ownershipLabel, 'Codex 自带');
+  assert.equal(skills['personal-skill'].ownership, 'personal');
+  assert.equal(skills['personal-skill'].ownershipLabel, '个人 / 下载');
+});
+
+test('区分 Codex 随附插件与远程下载插件', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-atlas-plugin-origin-'));
+  const bundledSkill = path.join(temp, 'openai-bundled', 'demo', 'skills', 'bundled-skill');
+  const remoteSkill = path.join(temp, 'openai-curated-remote', 'demo', 'skills', 'remote-skill');
+  await Promise.all([bundledSkill, remoteSkill].map((directory) => fs.mkdir(directory, { recursive: true })));
+  await fs.writeFile(path.join(bundledSkill, 'SKILL.md'), '---\nname: bundled-skill\ndescription: 随附技能\n---\n正文');
+  await fs.writeFile(path.join(remoteSkill, 'SKILL.md'), '---\nname: remote-skill\ndescription: 下载技能\n---\n正文');
+
+  const result = await scanSkills([{
+    id: 'codex-plugins', platform: 'codex', scope: '插件', label: 'Codex 插件技能', rootPath: temp
+  }]);
+  const skills = Object.fromEntries(result.skills.map((skill) => [skill.name, skill]));
+
+  assert.equal(skills['bundled-skill'].ownership, 'system');
+  assert.equal(skills['remote-skill'].ownership, 'personal');
+});

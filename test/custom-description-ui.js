@@ -1,22 +1,27 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
+const { attachCustomDescriptions } = require('../src/settings');
+
+app.setPath('userData', path.join(app.getPath('temp'), `skill-atlas-ui-test-${process.pid}`));
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('no-sandbox');
 
 const customDescription = '审查代码变更并输出按优先级排序的改进建议。';
 let savedDescription = '';
 
 function createResult() {
-  return {
+  return attachCustomDescriptions({
     skills: [{
       id: 'review-agent',
       name: 'review-agent',
       description: 'Review code changes and report actionable findings.',
-      localizedDescription: '审查代码变更并报告可操作问题。',
-      customDescription: savedDescription,
       body: '# Review agent\nReview the requested changes.',
       platform: 'codex',
       scope: '全局',
       source: 'Codex 用户技能',
       rootId: 'codex-user',
+      ownership: 'personal',
+      ownershipLabel: '个人 / 下载',
       path: 'C:\\skills\\review-agent',
       filePath: 'C:\\skills\\review-agent\\SKILL.md',
       modifiedAt: new Date().toISOString(),
@@ -37,10 +42,11 @@ function createResult() {
     }],
     errors: [],
     scannedAt: new Date().toISOString()
-  };
+  }, savedDescription ? { 'review-agent': savedDescription } : {});
 }
 
 ipcMain.handle('skills:scan', () => createResult());
+ipcMain.handle('app:version', () => '1.0.2');
 ipcMain.handle('skills:description:set', (_event, payload) => {
   savedDescription = String(payload.description || '').trim();
   return savedDescription;
@@ -69,9 +75,25 @@ app.whenReady().then(async () => {
     const initialDescription = await window.webContents.executeJavaScript(
       `document.querySelector('.skill-card p').textContent`
     );
-    if (initialDescription !== '审查代码变更并报告可操作问题。') {
+    if (initialDescription !== '以缺陷优先的方式只读审查代码变更，覆盖未提交修改、分支差异或指定提交，并输出可操作问题。') {
       throw new Error('未优先展示内置中文简介');
     }
+    const initialBadge = await window.webContents.executeJavaScript(
+      `document.querySelector('.custom-pill')?.textContent`
+    );
+    if (initialBadge !== '中文简介') throw new Error('未显示中文简介标识');
+    const ownershipBadge = await window.webContents.executeJavaScript(
+      `document.querySelector('.skill-card .origin-pill')?.textContent`
+    );
+    if (ownershipBadge !== '个人 / 下载') throw new Error('未显示 Skill 归属标签');
+    const scanTime = await window.webContents.executeJavaScript(
+      `document.querySelector('#scan-time')?.textContent`
+    );
+    if (!scanTime.startsWith('中文简介 1/1 · ')) throw new Error('未显示中文简介覆盖数量');
+    const appVersion = await window.webContents.executeJavaScript(
+      `document.querySelector('#app-version')?.textContent`
+    );
+    if (appVersion !== 'v1.0.2') throw new Error('未显示应用版本');
     await window.webContents.executeJavaScript(`(() => {
       document.querySelector('.skill-card').click();
       document.querySelector('#edit-description').click();
@@ -80,6 +102,10 @@ app.whenReady().then(async () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('#description-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     })()`);
+    const detailOwnershipBadge = await window.webContents.executeJavaScript(
+      `document.querySelector('#detail-ownership')?.textContent`
+    );
+    if (detailOwnershipBadge !== '个人 / 下载') throw new Error('详情页未显示 Skill 归属标签');
     await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
       let attempts = 0;
       const wait = () => {

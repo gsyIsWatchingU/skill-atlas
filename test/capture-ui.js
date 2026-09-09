@@ -2,8 +2,14 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { getDefaultRoots, scanSkills } = require('../src/skill-scanner');
+const { attachCustomDescriptions } = require('../src/settings');
 
-ipcMain.handle('skills:scan', () => scanSkills(getDefaultRoots()));
+app.setPath('userData', path.join(app.getPath('temp'), `skill-atlas-capture-${process.pid}`));
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('no-sandbox');
+
+ipcMain.handle('app:version', () => '1.0.2');
+ipcMain.handle('skills:scan', async () => attachCustomDescriptions(await scanSkills(getDefaultRoots())));
 
 app.whenReady().then(async () => {
   const window = new BrowserWindow({

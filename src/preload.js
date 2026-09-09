@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('skillAtlas', {
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  reloadUi: () => ipcRenderer.invoke('app:reload-ui'),
   scan: () => ipcRenderer.invoke('skills:scan'),
   saveDescription: (id, description) => ipcRenderer.invoke('skills:description:set', { id, description }),
   addRoot: (platform) => ipcRenderer.invoke('roots:add', platform),
