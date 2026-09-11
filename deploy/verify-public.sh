@@ -31,24 +31,18 @@ retry() {
 verify_url() {
   local base_url="$1"
   curl -fsS --max-time 20 "${base_url}/api/health" |
-    "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!j.ok||!j.database||!j.protected)process.exit(1)})"
+    "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!j.ok||!j.database||j.auth!=='sso'||!j.ssoConfigured)process.exit(1)})"
   curl -fsS --max-time 20 "${base_url}/" >/dev/null
-  curl -fsS --max-time 20 -H "Authorization: Bearer ${SKILL_ATLAS_TOKEN}" "${base_url}/api/skills" |
+  curl -fsS --max-time 20 "${base_url}/api/skills?scope=community" |
     "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!Array.isArray(j.skills))process.exit(1)})"
 }
 
 supervisorctl -c "${SUPERVISOR_CONFIG}" status skill-atlas | grep -q RUNNING
-supervisorctl -c "${SUPERVISOR_CONFIG}" status cloudflared-skill-atlas | grep -q RUNNING
+supervisorctl -c "${SUPERVISOR_CONFIG}" status tailscaled | grep -q RUNNING
 supervisorctl -c "${SUPERVISOR_CONFIG}" status github-actions-skill-atlas | grep -q RUNNING
 retry verify_url "${LOCAL_URL}"
 
-PUBLIC_URL="$(grep -Eho 'https://[a-z0-9-]+\.trycloudflare\.com' \
-  "${STATE_ROOT}/logs/cloudflared.out.log" \
-  "${STATE_ROOT}/logs/cloudflared.err.log" 2>/dev/null | tail -1)"
-if [[ -z "${PUBLIC_URL}" ]]; then
-  echo "未找到 Skill Atlas 公网地址" >&2
-  exit 1
-fi
+PUBLIC_URL="${PUBLIC_URL:?缺少固定公网地址}"
 
 retry verify_url "${PUBLIC_URL}"
 echo "本机与公网验证通过：${PUBLIC_URL}"

@@ -11,10 +11,9 @@ source "${STATE_ROOT}/.env"
 set +a
 
 curl -fsS "${BASE_URL}/api/health" |
-  "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!j.ok||!j.database)process.exit(1)})"
+  "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!j.ok||!j.database||j.auth!=='sso'||!j.ssoConfigured)process.exit(1)})"
 curl -fsS "${BASE_URL}/" >/dev/null
-curl -fsS -H "Authorization: Bearer ${SKILL_ATLAS_TOKEN}" \
-  "${BASE_URL}/api/skills" |
+curl -fsS "${BASE_URL}/api/skills?scope=community" |
   "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!Array.isArray(j.skills))process.exit(1)})"
 
-echo "Skill Atlas 验证通过：${BASE_URL}"
+echo "Skill Dock 验证通过：${BASE_URL}"

@@ -3,30 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="本机扫描、私有同步，随时取回你的 Agent Skills。">
-  <title>Skill Dock｜Skill 私有同步</title>
-  <link rel="icon" href="/icon.svg?v=2.0.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=1.1.1">
+  <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
+  <title>Skill Dock｜个人同步与 Skill 社区</title>
+  <link rel="icon" href="/icon.svg?v=2.1.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=2.1.0">
 </head>
 <body>
   <div class="page-shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Skill Dock 首页">
-        <span class="brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.0.0" alt=""></span>
+        <span class="brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.1.0" alt=""></span>
         <span><strong>Skill Dock</strong><small>Web Sync</small></span>
       </a>
-      <div class="connection">
-        <span id="connection-dot" class="connection-dot"></span>
-        <span id="connection-text">正在连接云端</span>
+      <div class="topbar-actions">
+        <div class="connection">
+          <span id="connection-dot" class="connection-dot"></span>
+          <span id="connection-text">正在连接云端</span>
+        </div>
+        <a id="login-link" class="button compact" href="/api/auth/login">登录 / 注册</a>
+        <div id="user-menu" class="user-menu hidden">
+          <span id="user-name"></span>
+          <button id="claim-legacy" class="text-button" type="button">认领旧仓库</button>
+          <button id="logout" class="text-button" type="button">退出</button>
+        </div>
       </div>
     </header>
 
     <main>
       <section class="hero">
         <div>
-          <p class="eyebrow">&gt; 本机扫描 · 私有同步 · 随时取回</p>
-          <h1>Skill 不再散落。<br><span>换台电脑，也能随时取回。</span></h1>
-          <p class="hero-copy">本机扫描，按需上传；你的 Skill，只进入自己的私有仓库。</p>
+          <p class="eyebrow">&gt; 本机扫描 · 账号同步 · 社区共享</p>
+          <h1>Skill 不散落。<br><span>登录即可管理。</span></h1>
+          <p class="hero-copy">私有 Skill 仅自己可见；发布到社区后，其他用户才能浏览和下载。</p>
         </div>
         <div class="hero-actions">
           <button id="scan-directory" class="button primary" type="button">扫描本机 Skill</button>
@@ -37,25 +45,13 @@
 
       <section class="privacy-note" aria-label="权限说明">
         <strong>浏览器权限边界</strong>
-        <span>Web 可以扫描你主动选择的目录，但不能静默遍历整台电脑。线上环境必须使用 HTTPS。</span>
-      </section>
-
-      <section class="token-panel">
-        <div>
-          <h2>仓库凭证</h2>
-          <p>令牌只保存在当前浏览器会话中，不会写入 Skill 包。</p>
-        </div>
-        <div class="token-controls">
-          <label class="visually-hidden" for="access-token">访问令牌</label>
-          <input id="access-token" type="password" autocomplete="current-password" placeholder="输入 SKILL_ATLAS_TOKEN">
-          <button id="save-token" class="button compact" type="button">连接</button>
-        </div>
+        <span>扫描只读取你主动选择的目录；未上传的文件不会离开本机，敏感凭证文件会自动过滤。</span>
       </section>
 
       <section class="summary-grid" aria-label="同步概览">
         <article><span>本机已扫描</span><strong id="local-count">0</strong></article>
-        <article><span>云端已存储</span><strong id="cloud-count">0</strong></article>
-        <article><span>本机缺失</span><strong id="missing-count">0</strong></article>
+        <article><span>我的云端</span><strong id="cloud-count">0</strong></article>
+        <article><span>社区 Skill</span><strong id="community-count">0</strong></article>
         <article><span>版本不同</span><strong id="different-count">0</strong></article>
       </section>
 
@@ -73,13 +69,25 @@
 
       <section class="workspace">
         <div class="section-heading">
-          <div><p class="section-kicker">CLOUD LIBRARY</p><h2>云端仓库</h2></div>
-          <span id="cloud-label" class="section-status">等待连接</span>
+          <div><p class="section-kicker">MY CLOUD</p><h2>我的 Skill</h2></div>
+          <span id="cloud-label" class="section-status">登录后同步</span>
         </div>
         <div id="cloud-skills" class="skill-grid"></div>
         <div id="cloud-empty" class="empty-state">
-          <strong>云端仓库为空</strong>
-          <span>扫描本机目录后，将个人 Skill 上传到这里。</span>
+          <strong id="cloud-empty-title">登录后使用私有同步</strong>
+          <span id="cloud-empty-copy">你的私有 Skill 与其他账号完全隔离。</span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading">
+          <div><p class="section-kicker">COMMUNITY</p><h2>Skill 社区</h2></div>
+          <span id="community-label" class="section-status">正在读取</span>
+        </div>
+        <div id="community-skills" class="skill-grid"></div>
+        <div id="community-empty" class="empty-state">
+          <strong>社区暂时为空</strong>
+          <span>登录后可将自己的 Skill 发布到社区。</span>
         </div>
       </section>
     </main>
@@ -88,7 +96,7 @@
   <dialog id="confirm-dialog">
     <form method="dialog">
       <p class="dialog-eyebrow">需要确认</p>
-      <h2 id="confirm-title">覆盖已有 Skill？</h2>
+      <h2 id="confirm-title">确认操作？</h2>
       <p id="confirm-message"></p>
       <div class="dialog-actions">
         <button class="button secondary" value="cancel">取消</button>
@@ -97,7 +105,21 @@
     </form>
   </dialog>
 
+  <dialog id="legacy-dialog">
+    <form id="legacy-form">
+      <p class="dialog-eyebrow">仅首次迁移需要</p>
+      <h2>认领旧仓库</h2>
+      <p>输入升级前使用的 SKILL_ATLAS_TOKEN，旧 Skill 会归入当前账号并保持私有。</p>
+      <label class="field-label" for="legacy-token">旧访问令牌</label>
+      <input id="legacy-token" class="dialog-input" type="password" autocomplete="off" required>
+      <div class="dialog-actions">
+        <button id="cancel-legacy" class="button secondary" type="button">取消</button>
+        <button class="button primary" type="submit">确认认领</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=1.0.2" defer></script>
+  <script src="/app.js?v=2.1.0" defer></script>
 </body>
 </html>

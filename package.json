@@ -1,6 +1,6 @@
 {
   "name": "skill-atlas",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "扫描、存储、比较并跨设备安装 Agent Skills 的在线应用",
   "private": true,
   "license": "MIT",

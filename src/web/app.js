@@ -6,17 +6,24 @@ const SKIP_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', '__pycache__',
 const state = {
   localSkills: [],
   cloudSkills: [],
-  accessToken: readSessionToken(),
-  protected: false,
+  communitySkills: [],
+  user: null,
   busy: false
 };
 
 const elements = {
-  accessToken: document.querySelector('#access-token'),
+  cancelLegacy: document.querySelector('#cancel-legacy'),
+  claimLegacy: document.querySelector('#claim-legacy'),
   cloudCount: document.querySelector('#cloud-count'),
   cloudEmpty: document.querySelector('#cloud-empty'),
+  cloudEmptyCopy: document.querySelector('#cloud-empty-copy'),
+  cloudEmptyTitle: document.querySelector('#cloud-empty-title'),
   cloudLabel: document.querySelector('#cloud-label'),
   cloudSkills: document.querySelector('#cloud-skills'),
+  communityCount: document.querySelector('#community-count'),
+  communityEmpty: document.querySelector('#community-empty'),
+  communityLabel: document.querySelector('#community-label'),
+  communitySkills: document.querySelector('#community-skills'),
   confirmDialog: document.querySelector('#confirm-dialog'),
   confirmMessage: document.querySelector('#confirm-message'),
   confirmTitle: document.querySelector('#confirm-title'),
@@ -24,32 +31,21 @@ const elements = {
   connectionText: document.querySelector('#connection-text'),
   differentCount: document.querySelector('#different-count'),
   directoryInput: document.querySelector('#directory-input'),
+  legacyDialog: document.querySelector('#legacy-dialog'),
+  legacyForm: document.querySelector('#legacy-form'),
+  legacyToken: document.querySelector('#legacy-token'),
   localCount: document.querySelector('#local-count'),
   localEmpty: document.querySelector('#local-empty'),
   localSkills: document.querySelector('#local-skills'),
-  missingCount: document.querySelector('#missing-count'),
+  loginLink: document.querySelector('#login-link'),
+  logout: document.querySelector('#logout'),
   refreshCloud: document.querySelector('#refresh-cloud'),
-  saveToken: document.querySelector('#save-token'),
   scanDirectory: document.querySelector('#scan-directory'),
   scanLabel: document.querySelector('#scan-label'),
-  toast: document.querySelector('#toast')
+  toast: document.querySelector('#toast'),
+  userMenu: document.querySelector('#user-menu'),
+  userName: document.querySelector('#user-name')
 };
-
-function readSessionToken() {
-  try {
-    return sessionStorage.getItem('skill-atlas-token') || '';
-  } catch {
-    return '';
-  }
-}
-
-function saveSessionToken(value) {
-  try {
-    sessionStorage.setItem('skill-atlas-token', value);
-  } catch {
-    // 隐私模式禁用会话存储时，令牌仅保留在内存中。
-  }
-}
 
 function normalizeName(value) {
   return String(value || '').normalize('NFKC').toLocaleLowerCase('en-US').trim();
@@ -86,11 +82,14 @@ function setBusy(value, label) {
 async function apiRequest(pathname, options) {
   const requestOptions = Object.assign({}, options || {});
   requestOptions.headers = Object.assign({}, requestOptions.headers || {});
-  if (state.accessToken) requestOptions.headers.Authorization = 'Bearer ' + state.accessToken;
   if (requestOptions.body) requestOptions.headers['Content-Type'] = 'application/json';
   const response = await fetch(pathname, requestOptions);
   const result = await response.json().catch(function () { return {}; });
-  if (!response.ok) throw new Error(result.error || '请求失败（' + response.status + '）');
+  if (!response.ok) {
+    const error = new Error(result.error || '请求失败（' + response.status + '）');
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 
@@ -327,13 +326,14 @@ function getCloudStatus(skill) {
   return { label: '版本不同', className: 'different' };
 }
 
-function createButton(label, action, index, kind, disabled) {
+function createButton(label, action, index, kind, disabled, source) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'button ' + (kind || 'secondary');
   button.textContent = label;
   button.dataset.action = action;
   button.dataset.index = String(index);
+  if (source) button.dataset.source = source;
   button.disabled = Boolean(disabled);
   return button;
 }
@@ -347,7 +347,9 @@ function createSkillCard(skill, source, index) {
   meta.className = 'skill-meta';
   const origin = document.createElement('span');
   origin.className = 'skill-origin';
-  origin.textContent = source === 'local' ? skill.source : 'PRIVATE CLOUD';
+  if (source === 'local') origin.textContent = skill.source;
+  if (source === 'cloud') origin.textContent = skill.visibility === 'community' ? '我的 · 社区' : '我的 · 私有';
+  if (source === 'community') origin.textContent = 'BY ' + (skill.authorName || '社区用户');
   const badge = document.createElement('span');
   badge.className = 'status-badge ' + status.className;
   badge.textContent = status.label;
@@ -366,15 +368,32 @@ function createSkillCard(skill, source, index) {
   actions.className = 'skill-actions';
   if (source === 'local') {
     const cloud = findCloudSkill(skill);
-    const synced = cloud && cloud.versionHash === skill.versionHash;
+    const sameVersion = cloud && cloud.versionHash === skill.versionHash;
     const canUpload = skill.ownership !== 'system' && skill.files.length > 0;
-    actions.append(createButton(
-      synced ? '已同步' : canUpload ? (cloud ? '更新云端' : '上传云端') : '请重新扫描',
-      'upload',
-      index,
-      synced ? 'secondary' : 'primary',
-      synced || !canUpload
-    ));
+    if (!state.user && canUpload) {
+      actions.append(createButton('登录后上传', 'login', index, 'primary', false, source));
+    } else if (canUpload) {
+      const privateSynced = sameVersion && cloud.visibility === 'private';
+      const communitySynced = sameVersion && cloud.visibility === 'community';
+      actions.append(createButton(
+        privateSynced ? '已私有同步' : '同步为私有',
+        'upload-private',
+        index,
+        privateSynced ? 'secondary' : 'primary',
+        privateSynced,
+        source
+      ));
+      actions.append(createButton(
+        communitySynced ? '已发布社区' : '发布到社区',
+        'upload-community',
+        index,
+        'secondary',
+        communitySynced,
+        source
+      ));
+    } else {
+      actions.append(createButton('不可上传', 'none', index, 'secondary', true, source));
+    }
   } else {
     const local = findLocalSkill(skill);
     const installed = local && local.versionHash === skill.versionHash;
@@ -383,9 +402,21 @@ function createSkillCard(skill, source, index) {
       'install',
       index,
       installed ? 'secondary' : 'primary',
-      installed || typeof window.showDirectoryPicker !== 'function'
+      installed || typeof window.showDirectoryPicker !== 'function',
+      source
     ));
-    actions.append(createButton('下载包', 'download', index, 'secondary', false));
+    actions.append(createButton('下载包', 'download', index, 'secondary', false, source));
+    if (source === 'cloud') {
+      actions.append(createButton(
+        skill.visibility === 'community' ? '设为私有' : '发布社区',
+        'toggle-visibility',
+        index,
+        'secondary',
+        false,
+        source
+      ));
+      actions.append(createButton('删除', 'delete', index, 'danger', false, source));
+    }
   }
 
   card.append(meta, title, description, details, actions);
@@ -395,38 +426,65 @@ function createSkillCard(skill, source, index) {
 function render() {
   elements.localSkills.replaceChildren();
   elements.cloudSkills.replaceChildren();
+  elements.communitySkills.replaceChildren();
   state.localSkills.forEach(function (skill, index) {
     elements.localSkills.append(createSkillCard(skill, 'local', index));
   });
   state.cloudSkills.forEach(function (skill, index) {
     elements.cloudSkills.append(createSkillCard(skill, 'cloud', index));
   });
+  state.communitySkills.forEach(function (skill, index) {
+    elements.communitySkills.append(createSkillCard(skill, 'community', index));
+  });
 
-  const missing = state.cloudSkills.filter(function (skill) { return !findLocalSkill(skill); }).length;
   const different = state.cloudSkills.filter(function (skill) {
     const local = findLocalSkill(skill);
     return local && local.versionHash !== skill.versionHash;
   }).length;
   elements.localCount.textContent = String(state.localSkills.length);
   elements.cloudCount.textContent = String(state.cloudSkills.length);
-  elements.missingCount.textContent = String(missing);
+  elements.communityCount.textContent = String(state.communitySkills.length);
   elements.differentCount.textContent = String(different);
   elements.localEmpty.classList.toggle('hidden', state.localSkills.length > 0);
   elements.cloudEmpty.classList.toggle('hidden', state.cloudSkills.length > 0);
+  elements.communityEmpty.classList.toggle('hidden', state.communitySkills.length > 0);
+}
+
+function renderAccount() {
+  elements.loginLink.classList.toggle('hidden', Boolean(state.user));
+  elements.userMenu.classList.toggle('hidden', !state.user);
+  elements.userName.textContent = state.user ? state.user.displayName : '';
+  elements.cloudEmptyTitle.textContent = state.user ? '我的云端仓库为空' : '登录后使用私有同步';
+  elements.cloudEmptyCopy.textContent = state.user
+    ? '扫描本机目录后，可选择私有同步或发布到社区。'
+    : '你的私有 Skill 与其他账号完全隔离。';
 }
 
 async function refreshCloud() {
   try {
-    elements.cloudLabel.textContent = '正在读取';
-    const result = await apiRequest('/api/skills');
-    state.cloudSkills = result.skills || [];
-    elements.cloudLabel.textContent = '已连接 · ' + state.cloudSkills.length + ' 个 Skill';
-    setConnection('online', '云端已连接');
+    elements.communityLabel.textContent = '正在读取';
+    elements.cloudLabel.textContent = state.user ? '正在读取' : '登录后同步';
+    const communityResult = await apiRequest('/api/skills?scope=community');
+    state.communitySkills = communityResult.skills || [];
+    state.cloudSkills = [];
+    if (state.user) {
+      try {
+        const mineResult = await apiRequest('/api/skills?scope=mine');
+        state.cloudSkills = mineResult.skills || [];
+      } catch (error) {
+        if (error.status !== 401) throw error;
+        state.user = null;
+        renderAccount();
+      }
+    }
+    elements.communityLabel.textContent = state.communitySkills.length + ' 个公开 Skill';
+    elements.cloudLabel.textContent = state.user ? state.cloudSkills.length + ' 个 Skill' : '登录后同步';
+    setConnection('online', state.user ? '账号已连接' : '社区已连接');
     render();
   } catch (error) {
-    elements.cloudLabel.textContent = error.message;
+    elements.communityLabel.textContent = error.message;
     setConnection('offline', error.message);
-    if (!(state.protected && !state.accessToken)) showToast(error.message, true);
+    showToast(error.message, true);
   }
 }
 
@@ -457,17 +515,23 @@ async function packageLocalSkill(skill) {
   };
 }
 
-async function uploadSkill(index, button) {
+async function uploadSkill(index, visibility, button) {
   const skill = state.localSkills[index];
+  if (!state.user) {
+    window.location.href = '/api/auth/login';
+    return;
+  }
   if (!skill || skill.ownership === 'system') return;
   button.disabled = true;
   button.textContent = '正在上传';
   try {
+    const payload = await packageLocalSkill(skill);
+    payload.visibility = visibility;
     const result = await apiRequest('/api/skills', {
       method: 'POST',
-      body: JSON.stringify(await packageLocalSkill(skill))
+      body: JSON.stringify(payload)
     });
-    showToast(result.skill.name + ' 已上传');
+    showToast(result.skill.name + (visibility === 'community' ? ' 已发布到社区' : ' 已私有同步'));
     await refreshCloud();
   } catch (error) {
     showToast(error.message, true);
@@ -545,13 +609,17 @@ async function writePackageToDirectory(parent, skillPackage) {
   return true;
 }
 
-async function getCloudPackage(index) {
-  const skill = state.cloudSkills[index];
+function skillCollection(source) {
+  return source === 'community' ? state.communitySkills : state.cloudSkills;
+}
+
+async function getCloudPackage(index, source) {
+  const skill = skillCollection(source)[index];
   if (!skill) throw new Error('云端 Skill 不存在');
   return apiRequest('/api/skills/' + encodeURIComponent(skill.id));
 }
 
-async function installSkill(index, button) {
+async function installSkill(index, source, button) {
   if (typeof window.showDirectoryPicker !== 'function') {
     showToast('当前浏览器不支持直接安装，请下载 Skill 包', true);
     return;
@@ -559,7 +627,7 @@ async function installSkill(index, button) {
   button.disabled = true;
   button.textContent = '等待选择目录';
   try {
-    const skillPackage = await getCloudPackage(index);
+    const skillPackage = await getCloudPackage(index, source);
     const targetRoot = await window.showDirectoryPicker({ mode: 'readwrite' });
     button.textContent = '正在写入';
     const installed = await writePackageToDirectory(targetRoot, skillPackage);
@@ -593,10 +661,10 @@ async function installSkill(index, button) {
   }
 }
 
-async function downloadSkill(index, button) {
+async function downloadSkill(index, source, button) {
   button.disabled = true;
   try {
-    const skillPackage = await getCloudPackage(index);
+    const skillPackage = await getCloudPackage(index, source);
     const blob = new Blob([JSON.stringify(skillPackage, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -608,6 +676,50 @@ async function downloadSkill(index, button) {
   } catch (error) {
     showToast(error.message, true);
   } finally {
+    button.disabled = false;
+  }
+}
+
+async function toggleVisibility(index, button) {
+  const skill = state.cloudSkills[index];
+  if (!skill) return;
+  const visibility = skill.visibility === 'community' ? 'private' : 'community';
+  if (visibility === 'community') {
+    const confirmed = await confirmAction(
+      '发布到社区？',
+      '发布后，所有访客都可以查看和下载这个 Skill。'
+    );
+    if (!confirmed) return;
+  }
+  button.disabled = true;
+  try {
+    await apiRequest('/api/skills/' + encodeURIComponent(skill.id), {
+      method: 'PATCH',
+      body: JSON.stringify({ visibility: visibility })
+    });
+    showToast(visibility === 'community' ? '已发布到社区' : '已设为私有');
+    await refreshCloud();
+  } catch (error) {
+    showToast(error.message, true);
+    button.disabled = false;
+  }
+}
+
+async function deleteCloudSkill(index, button) {
+  const skill = state.cloudSkills[index];
+  if (!skill) return;
+  const confirmed = await confirmAction(
+    '删除云端 Skill？',
+    '将删除“' + skill.name + '”的全部云端版本，本机文件不会受影响。'
+  );
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await apiRequest('/api/skills/' + encodeURIComponent(skill.id), { method: 'DELETE' });
+    showToast(skill.name + ' 已从云端删除');
+    await refreshCloud();
+  } catch (error) {
+    showToast(error.message, true);
     button.disabled = false;
   }
 }
@@ -661,43 +773,89 @@ async function checkHealth() {
     const response = await fetch('/api/health');
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error('服务不可用');
-    state.protected = result.protected;
-    if (state.protected && !state.accessToken) {
-      setConnection('', '需要访问令牌');
-      elements.cloudLabel.textContent = '请输入访问令牌';
-      return;
+    const account = await apiRequest('/api/auth/me');
+    state.user = account.user || null;
+    renderAccount();
+    if (!result.ssoConfigured) {
+      elements.loginLink.classList.add('disabled');
+      elements.loginLink.removeAttribute('href');
+      elements.loginLink.title = '统一账号尚未配置';
     }
     await refreshCloud();
   } catch (error) {
     setConnection('offline', '云端不可用');
     elements.cloudLabel.textContent = error.message;
+    elements.communityLabel.textContent = error.message;
   }
 }
 
 elements.scanDirectory.addEventListener('click', startScan);
 elements.directoryInput.addEventListener('change', handleInputScan);
 elements.refreshCloud.addEventListener('click', refreshCloud);
-elements.saveToken.addEventListener('click', function () {
-  state.accessToken = elements.accessToken.value.trim();
-  saveSessionToken(state.accessToken);
-  refreshCloud();
-});
-elements.accessToken.addEventListener('keydown', function (event) {
-  if (event.key === 'Enter') elements.saveToken.click();
-});
 elements.localSkills.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
-  if (!button || button.dataset.action !== 'upload') return;
-  uploadSkill(Number(button.dataset.index), button);
+  if (!button) return;
+  const index = Number(button.dataset.index);
+  if (button.dataset.action === 'login') window.location.href = '/api/auth/login';
+  if (button.dataset.action === 'upload-private') uploadSkill(index, 'private', button);
+  if (button.dataset.action === 'upload-community') uploadSkill(index, 'community', button);
 });
 elements.cloudSkills.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
   const index = Number(button.dataset.index);
-  if (button.dataset.action === 'install') installSkill(index, button);
-  if (button.dataset.action === 'download') downloadSkill(index, button);
+  if (button.dataset.action === 'install') installSkill(index, 'cloud', button);
+  if (button.dataset.action === 'download') downloadSkill(index, 'cloud', button);
+  if (button.dataset.action === 'toggle-visibility') toggleVisibility(index, button);
+  if (button.dataset.action === 'delete') deleteCloudSkill(index, button);
+});
+elements.communitySkills.addEventListener('click', function (event) {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const index = Number(button.dataset.index);
+  if (button.dataset.action === 'install') installSkill(index, 'community', button);
+  if (button.dataset.action === 'download') downloadSkill(index, 'community', button);
 });
 
-elements.accessToken.value = state.accessToken;
+elements.logout.addEventListener('click', async function () {
+  try {
+    await apiRequest('/api/auth/logout', { method: 'POST' });
+    state.user = null;
+    state.cloudSkills = [];
+    renderAccount();
+    await refreshCloud();
+    showToast('已退出登录');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
+
+elements.claimLegacy.addEventListener('click', function () {
+  elements.legacyToken.value = '';
+  elements.legacyDialog.showModal();
+});
+elements.cancelLegacy.addEventListener('click', function () {
+  elements.legacyDialog.close();
+});
+elements.legacyForm.addEventListener('submit', async function (event) {
+  event.preventDefault();
+  try {
+    const result = await apiRequest('/api/auth/claim-legacy', {
+      method: 'POST',
+      body: JSON.stringify({ legacyToken: elements.legacyToken.value })
+    });
+    elements.legacyDialog.close();
+    await refreshCloud();
+    showToast('已认领 ' + result.claimedLegacyCount + ' 个旧 Skill');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
+
 render();
+renderAccount();
+if (new URLSearchParams(window.location.search).has('auth_error')) {
+  showToast('登录未完成，请重试', true);
+  window.history.replaceState({}, '', window.location.pathname);
+}
 checkHealth();

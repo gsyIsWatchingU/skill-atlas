@@ -2,9 +2,12 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${PROJECT_ROOT}/.env"
+STATE_ROOT="${SKILL_ATLAS_STATE_ROOT:-${PROJECT_ROOT}}"
+ENV_FILE="${STATE_ROOT}/.env"
 DB_NAME="skill_atlas"
 DB_USER="skill_atlas"
+SSO_AUTH_BASE_URL="${SSO_AUTH_BASE_URL:?请先设置统一账号中心地址}"
+PUBLIC_URL="${PUBLIC_URL:?请先设置 Skill Dock 固定公网地址}"
 
 if [[ -e "${ENV_FILE}" ]]; then
   echo "已存在 .env，拒绝覆盖。" >&2
@@ -35,6 +38,8 @@ printf '%s\n' \
   'PORT=8787' \
   "DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}" \
   "SKILL_ATLAS_TOKEN=${APP_TOKEN}" \
+  "SSO_AUTH_BASE_URL=${SSO_AUTH_BASE_URL}" \
+  "PUBLIC_URL=${PUBLIC_URL}" \
   > "${ENV_FILE}"
 
-echo "数据库与私有访问令牌已创建，凭证仅保存在服务器 .env。"
+echo "数据库与旧仓库认领令牌已创建，凭证仅保存在服务器 .env。"
