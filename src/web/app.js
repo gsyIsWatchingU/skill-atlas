@@ -124,7 +124,7 @@ function setAuthMode(mode) {
     node.classList.toggle('hidden', !registering);
   });
   elements.authCode.required = registering;
-  elements.authPassword.minLength = registering ? 8 : 1;
+  elements.authPassword.minLength = registering ? 6 : 1;
   elements.authPassword.autocomplete = registering ? 'new-password' : 'current-password';
   elements.authResetRow.classList.toggle('hidden', registering);
   elements.submitAuth.textContent = registering ? '注册并登录' : '登录';
