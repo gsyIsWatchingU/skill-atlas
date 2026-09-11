@@ -195,6 +195,16 @@ dialog p:not(.dialog-eyebrow) { color: var(--pixel-ink-secondary); line-height: 
   background: var(--pixel-surface);
   color: var(--pixel-ink);
 }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; margin: 18px 0; border: 2px solid var(--pixel-ink); }
+.auth-tabs button { min-height: 40px; border: 0; background: var(--pixel-surface); }
+.auth-tabs button + button { border-left: 2px solid var(--pixel-ink); }
+.auth-tabs button.active { background: var(--pixel-green); font-weight: 800; }
+.auth-code-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.auth-code-row .button { min-height: 42px; white-space: nowrap; }
+.auth-message { margin: 14px 0 0 !important; color: var(--pixel-green-strong) !important; font-size: 12px; }
+.auth-message.error { color: var(--pixel-danger) !important; }
+.auth-reset-row { margin-top: 12px; font-size: 12px; text-align: center; }
+.auth-reset-row a { color: var(--pixel-green-strong); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 .toast {
   position: fixed;
@@ -247,6 +257,7 @@ dialog p:not(.dialog-eyebrow) { color: var(--pixel-ink-secondary); line-height: 
   .summary-grid article:nth-last-child(-n + 2) { border-bottom: 0; }
   .skill-grid { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .auth-code-row { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }

@@ -9,7 +9,7 @@
 - PostgreSQL 存储 Skill、版本和每个文件的二进制内容。
 - 通过 SHA-256 判断本机缺失、已同步和版本不同。
 - 默认禁止上传系统自带 Skill，并过滤环境变量、密钥和凭证文件。
-- 通过 Algorithm Lab 统一账号登录，私有 Skill 按账号隔离。
+- 通过本站邮箱密码表单接入统一账号，注册需邮箱验证码，私有 Skill 按账号隔离。
 - Skill 可在私有与社区两种可见性之间切换；社区 Skill 支持公开浏览和下载。
 
 浏览器不能静默遍历电脑。每个目录都必须由用户主动选择；公网环境必须使用 HTTPS。
@@ -17,7 +17,7 @@
 ## 架构
 
 ~~~text
-Algorithm Lab 统一账号（SSO + PKCE）
+Algorithm Lab 统一账号 API（保留 SSO + PKCE 兼容）
       ↓
 浏览器目录授权 → Skill Dock Web
       ↓

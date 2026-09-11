@@ -661,7 +661,12 @@ function normalizeSsoUser(payload) {
 }
 
 async function requestSsoUser(ssoBaseUrl, payload) {
-  const endpoint = new URL('/api/sso/token', ssoBaseUrl).toString();
+  const result = await requestSsoApi(ssoBaseUrl, 'token', payload);
+  return normalizeSsoUser(result);
+}
+
+async function requestSsoApi(ssoBaseUrl, action, payload) {
+  const endpoint = new URL('/api/sso/' + action, ssoBaseUrl).toString();
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -669,8 +674,11 @@ async function requestSsoUser(ssoBaseUrl, payload) {
     signal: AbortSignal.timeout(15000)
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw httpError(result.error || '统一账号登录失败', 502);
-  return normalizeSsoUser(result);
+  if (!response.ok) {
+    const statusCode = response.status >= 400 && response.status < 600 ? response.status : 502;
+    throw httpError(result.error || '统一账号登录失败', statusCode);
+  }
+  return result;
 }
 
 function createSkillAtlasServer(options = {}) {
@@ -678,6 +686,7 @@ function createSkillAtlasServer(options = {}) {
   const ssoAuthBaseUrl = options.ssoAuthBaseUrl ?? process.env.SSO_AUTH_BASE_URL ?? '';
   const publicUrl = options.publicUrl ?? process.env.PUBLIC_URL ?? '';
   const exchangeSsoCode = options.exchangeSsoCode || requestSsoUser;
+  const callSsoApi = options.callSsoApi || requestSsoApi;
   const ssoClientId = 'skill-dock';
   const repository = options.repository || createPgRepository(options.databaseUrl ?? process.env.DATABASE_URL);
   const consumeAuthAttempt = createRateLimiter();
@@ -693,6 +702,15 @@ function createSkillAtlasServer(options = {}) {
       throw httpError('统一账号地址配置无效', 500);
     }
     return { base, redirectUri: callback.toString() };
+  }
+
+  function accountSettings() {
+    if (!ssoAuthBaseUrl) throw httpError('统一账号服务尚未配置', 503);
+    try {
+      return { base: new URL(ssoAuthBaseUrl) };
+    } catch {
+      throw httpError('统一账号地址配置无效', 500);
+    }
   }
 
   async function getRequestUser(request) {
@@ -735,6 +753,54 @@ function createSkillAtlasServer(options = {}) {
         return;
       }
 
+      if (url.pathname === '/api/auth/register-code' && request.method === 'POST') {
+        ensureSameOrigin(request);
+        if (!consumeAuthAttempt(request, 'register-code')) throw httpError('验证码发送过于频繁，请稍后再试', 429);
+        const input = await readJsonBody(request);
+        const email = String(input.email || '').trim().toLocaleLowerCase('en-US');
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw httpError('邮箱格式不正确', 400);
+        const result = await callSsoApi(accountSettings().base.toString(), 'register-code', {
+          clientId: ssoClientId,
+          email
+        });
+        json(response, 200, { message: result.message || '验证码已发送' });
+        return;
+      }
+
+      if (url.pathname === '/api/auth/register' && request.method === 'POST') {
+        ensureSameOrigin(request);
+        if (!consumeAuthAttempt(request, 'register')) throw httpError('注册尝试过于频繁，请稍后再试', 429);
+        const input = await readJsonBody(request);
+        const result = await callSsoApi(accountSettings().base.toString(), 'register', {
+          clientId: ssoClientId,
+          email: String(input.email || ''),
+          password: String(input.password || ''),
+          code: String(input.code || ''),
+          name: String(input.name || '').trim() || undefined
+        });
+        const ssoUser = normalizeSsoUser(result);
+        const user = await repository.upsertSsoUser(ssoUser);
+        await issueSession(request, response, user);
+        json(response, 201, { user });
+        return;
+      }
+
+      if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+        ensureSameOrigin(request);
+        if (!consumeAuthAttempt(request, 'password-login')) throw httpError('登录过于频繁，请稍后再试', 429);
+        const input = await readJsonBody(request);
+        const result = await callSsoApi(accountSettings().base.toString(), 'login', {
+          clientId: ssoClientId,
+          email: String(input.email || ''),
+          password: String(input.password || '')
+        });
+        const ssoUser = normalizeSsoUser(result);
+        const user = await repository.upsertSsoUser(ssoUser);
+        await issueSession(request, response, user);
+        json(response, 200, { user });
+        return;
+      }
+
       if (url.pathname === '/api/auth/login' && request.method === 'GET') {
         if (!consumeAuthAttempt(request, 'sso-login')) throw httpError('登录过于频繁，请稍后再试', 429);
         const settings = ssoSettings();
@@ -755,6 +821,11 @@ function createSkillAtlasServer(options = {}) {
         authorizeUrl.searchParams.set('code_challenge', codeChallenge);
         authorizeUrl.searchParams.set('code_challenge_method', 'S256');
         redirect(response, authorizeUrl.toString());
+        return;
+      }
+
+      if (url.pathname === '/api/auth/forgot-password' && request.method === 'GET') {
+        redirect(response, new URL('/forgot-password', accountSettings().base).toString());
         return;
       }
 

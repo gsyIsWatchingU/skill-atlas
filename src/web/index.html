@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
   <title>Skill Dock｜个人同步与 Skill 社区</title>
-  <link rel="icon" href="/icon.svg?v=2.1.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=2.1.0">
+  <link rel="icon" href="/icon.svg?v=2.2.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=2.2.0">
 </head>
 <body>
   <div class="page-shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Skill Dock 首页">
-        <span class="brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.1.0" alt=""></span>
+        <span class="brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.2.0" alt=""></span>
         <span><strong>Skill Dock</strong><small>Web Sync</small></span>
       </a>
       <div class="topbar-actions">
@@ -20,7 +20,7 @@
           <span id="connection-dot" class="connection-dot"></span>
           <span id="connection-text">正在连接云端</span>
         </div>
-        <a id="login-link" class="button compact" href="/api/auth/login">登录 / 注册</a>
+        <button id="login-link" class="button compact" type="button">登录 / 注册</button>
         <div id="user-menu" class="user-menu hidden">
           <span id="user-name"></span>
           <button id="claim-legacy" class="text-button" type="button">认领旧仓库</button>
@@ -119,7 +119,39 @@
     </form>
   </dialog>
 
+  <dialog id="auth-dialog">
+    <form id="auth-form">
+      <p class="dialog-eyebrow">四站共用同一邮箱账号</p>
+      <h2 id="auth-title">登录 Skill Dock</h2>
+      <div class="auth-tabs">
+        <button id="auth-login-tab" class="active" type="button">登录</button>
+        <button id="auth-register-tab" type="button">注册</button>
+      </div>
+      <label class="field-label" for="auth-email">邮箱</label>
+      <input id="auth-email" class="dialog-input" type="email" autocomplete="email" required>
+      <div class="auth-register-only hidden">
+        <label class="field-label" for="auth-name">昵称（可选）</label>
+        <input id="auth-name" class="dialog-input" type="text" maxlength="40" autocomplete="nickname" placeholder="默认使用邮箱 @ 前的名称">
+      </div>
+      <div class="auth-register-only hidden">
+        <label class="field-label" for="auth-code">邮箱验证码</label>
+        <div class="auth-code-row">
+          <input id="auth-code" class="dialog-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6">
+          <button id="send-auth-code" class="button secondary" type="button">发送验证码</button>
+        </div>
+      </div>
+      <label class="field-label" for="auth-password">密码</label>
+      <input id="auth-password" class="dialog-input" type="password" autocomplete="current-password" required>
+      <p id="auth-message" class="auth-message hidden"></p>
+      <div id="auth-reset-row" class="auth-reset-row"><a href="/api/auth/forgot-password">忘记密码</a></div>
+      <div class="dialog-actions">
+        <button id="cancel-auth" class="button secondary" type="button">取消</button>
+        <button id="submit-auth" class="button primary" type="submit">登录</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=2.1.0" defer></script>
+  <script src="/app.js?v=2.2.0" defer></script>
 </body>
 </html>

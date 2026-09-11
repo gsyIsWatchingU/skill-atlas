@@ -160,6 +160,58 @@ test('计算稳定版本并拒绝不安全路径', () => {
   assert.throws(() => validatePackage(payload), /不安全的文件路径/);
 });
 
+test('站内邮箱表单调用统一账号服务并建立本站会话', async (t) => {
+  const repository = createMemoryRepository();
+  const calls = [];
+  const server = createSkillAtlasServer({
+    repository,
+    ssoAuthBaseUrl: 'https://accounts.example.test',
+    publicUrl: 'https://skills.example.test',
+    callSsoApi: async (_baseUrl, action, payload) => {
+      calls.push({ action, payload });
+      if (action === 'register-code') return { message: '验证码已发送' };
+      return {
+        user: {
+          id: 'shared-user',
+          email: payload.email,
+          name: payload.name || '共享用户',
+          image: null
+        }
+      };
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  const headers = { Origin: baseUrl, 'Content-Type': 'application/json' };
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+  });
+
+  const code = await fetch(baseUrl + '/api/auth/register-code', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email: 'user@example.com' })
+  });
+  assert.equal(code.status, 200);
+
+  const registration = await fetch(baseUrl + '/api/auth/register', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      email: 'user@example.com',
+      password: 'password-123',
+      code: '123456',
+      name: ''
+    })
+  });
+  assert.equal(registration.status, 201);
+  assert.match(registration.headers.get('set-cookie'), /skill_atlas_session=/);
+  assert.deepEqual(calls.map((item) => item.action), ['register-code', 'register']);
+  assert.equal(calls[1].payload.clientId, 'skill-dock');
+});
+
 test('统一账号登录后按账号隔离私有 Skill，并公开社区 Skill', async (t) => {
   let pendingUser = null;
   const repository = createMemoryRepository();

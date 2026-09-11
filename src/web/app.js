@@ -8,10 +8,23 @@ const state = {
   cloudSkills: [],
   communitySkills: [],
   user: null,
-  busy: false
+  busy: false,
+  authMode: 'login'
 };
 
 const elements = {
+  authCode: document.querySelector('#auth-code'),
+  authDialog: document.querySelector('#auth-dialog'),
+  authEmail: document.querySelector('#auth-email'),
+  authForm: document.querySelector('#auth-form'),
+  authLoginTab: document.querySelector('#auth-login-tab'),
+  authMessage: document.querySelector('#auth-message'),
+  authName: document.querySelector('#auth-name'),
+  authPassword: document.querySelector('#auth-password'),
+  authRegisterTab: document.querySelector('#auth-register-tab'),
+  authResetRow: document.querySelector('#auth-reset-row'),
+  authTitle: document.querySelector('#auth-title'),
+  cancelAuth: document.querySelector('#cancel-auth'),
   cancelLegacy: document.querySelector('#cancel-legacy'),
   claimLegacy: document.querySelector('#claim-legacy'),
   cloudCount: document.querySelector('#cloud-count'),
@@ -42,6 +55,8 @@ const elements = {
   refreshCloud: document.querySelector('#refresh-cloud'),
   scanDirectory: document.querySelector('#scan-directory'),
   scanLabel: document.querySelector('#scan-label'),
+  sendAuthCode: document.querySelector('#send-auth-code'),
+  submitAuth: document.querySelector('#submit-auth'),
   toast: document.querySelector('#toast'),
   userMenu: document.querySelector('#user-menu'),
   userName: document.querySelector('#user-name')
@@ -91,6 +106,37 @@ async function apiRequest(pathname, options) {
     throw error;
   }
   return result;
+}
+
+function setAuthMessage(message, isError) {
+  elements.authMessage.textContent = message || '';
+  elements.authMessage.classList.toggle('hidden', !message);
+  elements.authMessage.classList.toggle('error', Boolean(isError));
+}
+
+function setAuthMode(mode) {
+  state.authMode = mode;
+  const registering = mode === 'register';
+  elements.authTitle.textContent = registering ? '注册统一账号' : '登录 Skill Dock';
+  elements.authLoginTab.classList.toggle('active', !registering);
+  elements.authRegisterTab.classList.toggle('active', registering);
+  document.querySelectorAll('.auth-register-only').forEach(function (node) {
+    node.classList.toggle('hidden', !registering);
+  });
+  elements.authCode.required = registering;
+  elements.authPassword.minLength = registering ? 8 : 1;
+  elements.authPassword.autocomplete = registering ? 'new-password' : 'current-password';
+  elements.authResetRow.classList.toggle('hidden', registering);
+  elements.submitAuth.textContent = registering ? '注册并登录' : '登录';
+  setAuthMessage('', false);
+}
+
+function openAuthDialog() {
+  setAuthMode('login');
+  elements.authPassword.value = '';
+  elements.authCode.value = '';
+  elements.authDialog.showModal();
+  elements.authEmail.focus();
 }
 
 function parseFrontmatter(content, fallbackName) {
@@ -518,7 +564,7 @@ async function packageLocalSkill(skill) {
 async function uploadSkill(index, visibility, button) {
   const skill = state.localSkills[index];
   if (!state.user) {
-    window.location.href = '/api/auth/login';
+    openAuthDialog();
     return;
   }
   if (!skill || skill.ownership === 'system') return;
@@ -790,13 +836,65 @@ async function checkHealth() {
 }
 
 elements.scanDirectory.addEventListener('click', startScan);
+elements.loginLink.addEventListener('click', openAuthDialog);
+elements.authLoginTab.addEventListener('click', function () { setAuthMode('login'); });
+elements.authRegisterTab.addEventListener('click', function () { setAuthMode('register'); });
+elements.cancelAuth.addEventListener('click', function () { elements.authDialog.close(); });
+elements.authCode.addEventListener('input', function () {
+  elements.authCode.value = elements.authCode.value.replace(/\D/g, '').slice(0, 6);
+});
+elements.sendAuthCode.addEventListener('click', async function () {
+  if (!elements.authEmail.value) {
+    setAuthMessage('请先填写邮箱', true);
+    return;
+  }
+  elements.sendAuthCode.disabled = true;
+  setAuthMessage('', false);
+  try {
+    const result = await apiRequest('/api/auth/register-code', {
+      method: 'POST',
+      body: JSON.stringify({ email: elements.authEmail.value })
+    });
+    setAuthMessage(result.message || '验证码已发送', false);
+  } catch (error) {
+    setAuthMessage(error.message, true);
+  } finally {
+    elements.sendAuthCode.disabled = false;
+  }
+});
+elements.authForm.addEventListener('submit', async function (event) {
+  event.preventDefault();
+  elements.submitAuth.disabled = true;
+  setAuthMessage('', false);
+  const registering = state.authMode === 'register';
+  try {
+    const result = await apiRequest(registering ? '/api/auth/register' : '/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: elements.authEmail.value,
+        password: elements.authPassword.value,
+        code: registering ? elements.authCode.value : undefined,
+        name: registering ? elements.authName.value : undefined
+      })
+    });
+    state.user = result.user;
+    elements.authDialog.close();
+    renderAccount();
+    await refreshCloud();
+    showToast(registering ? '注册成功' : '登录成功');
+  } catch (error) {
+    setAuthMessage(error.message, true);
+  } finally {
+    elements.submitAuth.disabled = false;
+  }
+});
 elements.directoryInput.addEventListener('change', handleInputScan);
 elements.refreshCloud.addEventListener('click', refreshCloud);
 elements.localSkills.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
   const index = Number(button.dataset.index);
-  if (button.dataset.action === 'login') window.location.href = '/api/auth/login';
+  if (button.dataset.action === 'login') openAuthDialog();
   if (button.dataset.action === 'upload-private') uploadSkill(index, 'private', button);
   if (button.dataset.action === 'upload-community') uploadSkill(index, 'community', button);
 });
