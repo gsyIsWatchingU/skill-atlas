@@ -1,6 +1,12 @@
 node_modules/
 outputs/
 work/
+data/
+logs/
+run/
+releases/
+.deploy-tmp/
+current
 
 *.log
 .DS_Store

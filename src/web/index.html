@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="本机扫描、私有同步，随时取回你的 Agent Skills。">
+  <title>Skill Dock｜Skill 私有同步</title>
+  <link rel="icon" href="/icon.svg?v=2.0.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=1.1.1">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Skill Dock 首页">
+        <span class="brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.0.0" alt=""></span>
+        <span><strong>Skill Dock</strong><small>Web Sync</small></span>
+      </a>
+      <div class="connection">
+        <span id="connection-dot" class="connection-dot"></span>
+        <span id="connection-text">正在连接云端</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">&gt; 本机扫描 · 私有同步 · 随时取回</p>
+          <h1>Skill 不再散落。<br><span>换台电脑，也能随时取回。</span></h1>
+          <p class="hero-copy">本机扫描，按需上传；你的 Skill，只进入自己的私有仓库。</p>
+        </div>
+        <div class="hero-actions">
+          <button id="scan-directory" class="button primary" type="button">扫描本机 Skill</button>
+          <button id="refresh-cloud" class="button secondary" type="button">刷新云端 Skill</button>
+          <input id="directory-input" class="visually-hidden" type="file" webkitdirectory multiple>
+        </div>
+      </section>
+
+      <section class="privacy-note" aria-label="权限说明">
+        <strong>浏览器权限边界</strong>
+        <span>Web 可以扫描你主动选择的目录，但不能静默遍历整台电脑。线上环境必须使用 HTTPS。</span>
+      </section>
+
+      <section class="token-panel">
+        <div>
+          <h2>仓库凭证</h2>
+          <p>令牌只保存在当前浏览器会话中，不会写入 Skill 包。</p>
+        </div>
+        <div class="token-controls">
+          <label class="visually-hidden" for="access-token">访问令牌</label>
+          <input id="access-token" type="password" autocomplete="current-password" placeholder="输入 SKILL_ATLAS_TOKEN">
+          <button id="save-token" class="button compact" type="button">连接</button>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="同步概览">
+        <article><span>本机已扫描</span><strong id="local-count">0</strong></article>
+        <article><span>云端已存储</span><strong id="cloud-count">0</strong></article>
+        <article><span>本机缺失</span><strong id="missing-count">0</strong></article>
+        <article><span>版本不同</span><strong id="different-count">0</strong></article>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading">
+          <div><p class="section-kicker">LOCAL INVENTORY</p><h2>本机目录</h2></div>
+          <span id="scan-label" class="section-status">尚未授权目录</span>
+        </div>
+        <div id="local-skills" class="skill-grid"></div>
+        <div id="local-empty" class="empty-state">
+          <strong>还没有本机清单</strong>
+          <span>选择 .codex/skills、.agents/skills 或其他 Skill 根目录开始扫描。</span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading">
+          <div><p class="section-kicker">CLOUD LIBRARY</p><h2>云端仓库</h2></div>
+          <span id="cloud-label" class="section-status">等待连接</span>
+        </div>
+        <div id="cloud-skills" class="skill-grid"></div>
+        <div id="cloud-empty" class="empty-state">
+          <strong>云端仓库为空</strong>
+          <span>扫描本机目录后，将个人 Skill 上传到这里。</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <p class="dialog-eyebrow">需要确认</p>
+      <h2 id="confirm-title">覆盖已有 Skill？</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-actions">
+        <button class="button secondary" value="cancel">取消</button>
+        <button class="button primary" value="confirm">继续</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js?v=1.0.2" defer></script>
+</body>
+</html>

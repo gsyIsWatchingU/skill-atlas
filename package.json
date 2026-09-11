@@ -1,55 +1,18 @@
 {
   "name": "skill-atlas",
-  "version": "1.0.2",
-  "description": "集中查看和管理 Codex、Trae 与共享 Agent Skills 的桌面应用",
-  "main": "src/main.js",
-  "author": "Skill Atlas",
+  "version": "2.0.0",
+  "description": "扫描、存储、比较并跨设备安装 Agent Skills 的在线应用",
+  "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "dev": "electronmon .",
-    "test": "node --test test/skill-scanner.test.js test/settings.test.js test/chinese-descriptions.test.js test/usage-scanner.test.js",
-    "test:ui": "electron test/custom-description-ui.js",
-    "test:usage-ui": "electron test/usage-ui.js",
-    "pack": "electron-builder --win portable",
-    "dist": "electron-builder --win nsis portable"
+    "start": "node src/web-server.js",
+    "dev": "node --watch src/web-server.js",
+    "test": "node --test test/web-server.test.js"
   },
-  "devDependencies": {
-    "electron": "^37.4.0",
-    "electron-builder": "^26.0.12",
-    "electronmon": "^2.0.4"
+  "engines": {
+    "node": ">=20"
   },
-  "electronmon": {
-    "patterns": [
-      "!outputs/**",
-      "!work/**",
-      "!test/**",
-      "!README.md",
-      "!package-lock.json"
-    ]
-  },
-  "build": {
-    "appId": "com.skillatlas.desktop",
-    "productName": "Skill Atlas",
-    "electronDist": "node_modules/electron/dist",
-    "directories": {
-      "output": "outputs"
-    },
-    "files": [
-      "src/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        "portable",
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "Skill Atlas"
-    }
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }

@@ -1,33 +1,81 @@
 # Skill Atlas
 
-集中查看 Codex、Trae 和共享 Agent Skills 的 Windows 桌面应用。
+纯在线 Agent Skill 仓库，用于扫描、存储、比较和跨设备安装 Skill。
 
 ## 功能
 
-- 自动扫描 Codex、Trae、Trae CLI 与 `.agents/skills`。
-- 从本机 Codex 会话日志统计 Skill 使用次数、近 30 天趋势和最后使用时间。
-- 按平台、范围、重名和元数据完整度筛选。
-- 通过标签区分 `Codex 自带` 与 `个人 / 下载` Skill。
-- 搜索名称、描述、来源和路径。
-- 为当前已识别的 Skill 提供应用内中文简介，不修改原始 `SKILL.md`。
-- 扫描状态显示中文简介覆盖数量，便于确认当前运行版本与匹配结果。
-- 为任意 Skill 添加本地持久化的自定义中文简介，并优先用于展示、搜索和导出。
-- 查看完整指令、打开文件、定位目录、复制路径。
-- 添加自定义项目目录并导出 JSON 清单。
+- 浏览器授权后扫描 **.codex/skills**、**.agents/skills** 等目录。
+- Chrome / Edge 可把云端 Skill 直接写入用户授权的目录。
+- PostgreSQL 存储 Skill、版本和每个文件的二进制内容。
+- 通过 SHA-256 判断本机缺失、已同步和版本不同。
+- 默认禁止上传系统自带 Skill，并过滤环境变量、密钥和凭证文件。
+- 使用访问令牌保护个人私有仓库。
 
-## 开发运行
+浏览器不能静默遍历电脑。每个目录都必须由用户主动选择；公网环境必须使用 HTTPS。
 
-```powershell
+## 架构
+
+~~~text
+浏览器目录授权
+      ↓
+Skill Atlas Web
+      ↓
+GPU PostgreSQL
+skills → skill_versions → skill_files(BYTEA)
+~~~
+
+## 本地开发
+
+需要可访问的 PostgreSQL：
+
+~~~powershell
 npm install
+$env:DATABASE_URL = "postgresql://skill_atlas:密码@127.0.0.1:5432/skill_atlas"
+$env:SKILL_ATLAS_TOKEN = "私有访问令牌"
 npm run dev
-```
+~~~
 
-开发模式下，界面文件变化会自动刷新，主进程文件变化会自动重启。使用 `npm start` 可普通启动，不监听文件变化。
+访问 **http://127.0.0.1:8787**。
 
-## 构建
+## GPU 部署
 
-```powershell
-npm run pack
-```
+项目部署到 **/workspace/projects/skill-atlas**，数据库使用 GPU 上已有的 PostgreSQL。
 
-生成的 Windows 便携版位于 `outputs/`。
+~~~bash
+bash deploy/init-gpu-database.sh
+npm ci --omit=dev
+bash deploy/start.sh
+~~~
+
+正式运行由 Supervisor 管理应用与 Cloudflare Tunnel。Quick Tunnel 地址会在重启后变化；固定地址需使用 Named Tunnel。
+
+## 自动部署
+
+推送到 `main` 后，GitHub Actions 会先在公共 Runner 上测试并生成发布包，再由标签为 `skill-atlas-gpu` 的 GPU 自托管 Runner 下载发布包并完成：
+
+1. 安装生产依赖并切换版本。
+2. 重启 `skill-atlas` Supervisor 进程。
+3. 验证 PostgreSQL、本机接口、HTTPS 首页和带令牌的 REST API。
+4. 将已验证提交写入 `/workspace/projects/skill-atlas/run/deployed-commit`。
+
+发布过程保留服务器上的 `.env`、数据库、日志和历史版本；新版本验证失败时自动回退。
+
+查看部署状态：
+
+~~~bash
+supervisorctl -c /workspace/etc/supervisord.conf status skill-atlas cloudflared-skill-atlas github-actions-skill-atlas
+cat /workspace/projects/skill-atlas/run/deployed-commit
+bash /workspace/projects/skill-atlas/current/deploy/verify-public.sh
+~~~
+
+## 验证
+
+~~~powershell
+npm test
+node --check src/web-server.js
+node --check src/web/app.js
+~~~
+
+~~~bash
+bash deploy/verify.sh
+~~~

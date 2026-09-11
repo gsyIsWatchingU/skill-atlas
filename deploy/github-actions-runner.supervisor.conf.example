@@ -1,0 +1,17 @@
+[program:github-actions-skill-atlas]
+command=/workspace/.tools/actions-runner-skill-atlas/run.sh
+directory=/workspace/.tools/actions-runner-skill-atlas
+environment=HOME="/root",RUNNER_ALLOW_RUNASROOT="1",TZ="Asia/Shanghai"
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+stopasgroup=true
+killasgroup=true
+priority=10
+stdout_logfile=/workspace/.tools/actions-runner-skill-atlas/_diag/supervisor.out.log
+stderr_logfile=/workspace/.tools/actions-runner-skill-atlas/_diag/supervisor.err.log
+stdout_logfile_maxbytes=10MB
+stderr_logfile_maxbytes=10MB
+stdout_logfile_backups=3
+stderr_logfile_backups=3

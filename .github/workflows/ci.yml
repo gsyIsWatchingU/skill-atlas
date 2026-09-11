@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -11,27 +11,86 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: skill-atlas-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  test:
-    name: Test on Windows
-    runs-on: windows-latest
+  quality:
+    name: 构建检查
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: Checkout repository
+      - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - name: 安装依赖
         run: npm ci
 
-      - name: Run tests
+      - name: 运行测试
         run: npm test
+
+      - name: 检查语法
+        run: |
+          node --check src/web-server.js
+          node --check src/web/app.js
+
+      - name: 生成部署包
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/skill-atlas-${GITHUB_SHA}.tar.gz"
+          trap 'rm -f .deploy-manifest' EXIT
+          git ls-files > .deploy-manifest
+          tar --verbatim-files-from -czf "$archive" -T .deploy-manifest .deploy-manifest
+
+      - name: 上传部署包
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-atlas-${{ github.sha }}
+          path: ${{ runner.temp }}/skill-atlas-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: 部署到 GPU 公网
+    needs: quality
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, X64, skill-atlas-gpu]
+    timeout-minutes: 20
+    env:
+      DEPLOY_PATH: /workspace/projects/skill-atlas
+
+    steps:
+      - name: 下载部署包
+        uses: actions/download-artifact@v4
+        with:
+          name: skill-atlas-${{ github.sha }}
+          path: ${{ runner.temp }}/skill-atlas-release
+
+      - name: 发布并验证
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/skill-atlas-release/skill-atlas-${GITHUB_SHA}.tar.gz"
+          release_dir="$DEPLOY_PATH/.deploy-tmp/release-${GITHUB_SHA}"
+          [[ "$DEPLOY_PATH" == "/workspace/projects/skill-atlas" ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$release_dir" == "$DEPLOY_PATH/.deploy-tmp/release-$GITHUB_SHA" ]]
+          test -f "$archive"
+          test -f "$DEPLOY_PATH/.env"
+
+          mkdir -p "$DEPLOY_PATH/.deploy-tmp"
+          rm -rf -- "$release_dir"
+          mkdir -p "$release_dir"
+          trap 'rm -rf -- "$release_dir"' EXIT
+          tar -xzf "$archive" -C "$release_dir"
+          bash "$release_dir/deploy/apply-release.sh" "$release_dir" "$DEPLOY_PATH" "$GITHUB_SHA"
