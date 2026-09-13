@@ -136,7 +136,7 @@ h1 span { color: var(--pixel-green-strong); }
 .scan-directory-card strong { font-size: 13px; line-height: 1.5; }
 .scan-directory-card code { overflow: hidden; color: var(--pixel-ink-secondary); font: 11px/1.5 var(--pixel-font); text-overflow: ellipsis; white-space: nowrap; }
 .scan-directory-card small { color: var(--pixel-ink-secondary); font-size: 10px; line-height: 1.5; }
-.scan-directory-actions { display: flex; align-items: center; gap: 12px; margin-top: auto; }
+.scan-directory-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .scan-directory-actions .button { min-height: 34px; padding: 0 11px; font-size: 11px; }
 .scan-directory-footer { display: flex; align-items: center; gap: 14px; margin-top: 12px; color: var(--pixel-ink-secondary); font-size: 11px; }
 .scan-directory-footer .button { min-height: 38px; }

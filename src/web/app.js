@@ -575,10 +575,15 @@ function createScanDirectoryCard(directory, index) {
     ? (directory.error || '无法读取该目录')
     : directory.handle
       ? '已关联：' + directory.handle.name
-      : '首次授权后将保存到当前浏览器';
+      : directory.custom
+        ? '首次授权后将保存到当前浏览器'
+        : '先复制路径，再授权并粘贴到弹窗地址栏';
 
   const actions = document.createElement('div');
   actions.className = 'scan-directory-actions';
+  if (!directory.custom) {
+    actions.append(createButton('复制路径', 'copy-directory-path', index, 'secondary', state.busy));
+  }
   const authorizeLabel = directory.handle
     ? directory.status === 'permission' ? '重新授权' : '更换目录'
     : '授权目录';
@@ -1010,6 +1015,21 @@ async function authorizeScanDirectory(index) {
   }
 }
 
+async function copyScanDirectoryPath(index, button) {
+  const directory = state.scanDirectories[index];
+  if (!directory || directory.custom) return;
+  try {
+    await navigator.clipboard.writeText(directory.path);
+    button.textContent = '已复制';
+    showToast('路径已复制；点击“授权目录”后粘贴到地址栏');
+    setTimeout(function () {
+      if (button.isConnected) button.textContent = '复制路径';
+    }, 1800);
+  } catch {
+    showToast('复制失败，请手动复制卡片中的路径', true);
+  }
+}
+
 async function addScanDirectory() {
   if (state.busy) return;
   if (typeof window.showDirectoryPicker !== 'function' || !window.isSecureContext) {
@@ -1134,6 +1154,7 @@ elements.scanDirectories.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
   const index = Number(button.dataset.index);
+  if (button.dataset.action === 'copy-directory-path') copyScanDirectoryPath(index, button);
   if (button.dataset.action === 'authorize-directory') authorizeScanDirectory(index);
   if (button.dataset.action === 'remove-directory') removeScanDirectory(index);
 });
