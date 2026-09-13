@@ -2,9 +2,19 @@ const MAX_SKILL_BYTES = 20 * 1024 * 1024;
 const MAX_SKILL_FILES = 1000;
 const MAX_SCAN_DEPTH = 12;
 const SKIP_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', '__pycache__', 'dist', 'build', 'coverage']);
+const SCAN_DIRECTORY_DB = 'skill-dock-local';
+const SCAN_DIRECTORY_STORE = 'scan-directories';
+const DEFAULT_SCAN_DIRECTORIES = [
+  { id: 'codex-user', label: 'Codex 个人 Skill', path: '%USERPROFILE%\\.codex\\skills', custom: false },
+  { id: 'shared-agents', label: '跨 Agent 共享 Skill', path: '%USERPROFILE%\\.agents\\skills', custom: false },
+  { id: 'codex-plugins', label: 'Codex 插件 Skill', path: '%USERPROFILE%\\.codex\\plugins\\cache', custom: false }
+];
 
 const state = {
   localSkills: [],
+  scanDirectories: DEFAULT_SCAN_DIRECTORIES.map(function (directory) {
+    return Object.assign({ handle: null, status: 'waiting', skillCount: 0 }, directory);
+  }),
   cloudSkills: [],
   communitySkills: [],
   user: null,
@@ -24,6 +34,7 @@ const elements = {
   authRegisterTab: document.querySelector('#auth-register-tab'),
   authResetRow: document.querySelector('#auth-reset-row'),
   authTitle: document.querySelector('#auth-title'),
+  addScanDirectory: document.querySelector('#add-scan-directory'),
   cancelAuth: document.querySelector('#cancel-auth'),
   cancelLegacy: document.querySelector('#cancel-legacy'),
   claimLegacy: document.querySelector('#claim-legacy'),
@@ -54,6 +65,8 @@ const elements = {
   logout: document.querySelector('#logout'),
   refreshCloud: document.querySelector('#refresh-cloud'),
   scanDirectory: document.querySelector('#scan-directory'),
+  scanDirectories: document.querySelector('#scan-directories'),
+  scanDirectorySummary: document.querySelector('#scan-directory-summary'),
   scanLabel: document.querySelector('#scan-label'),
   sendAuthCode: document.querySelector('#send-auth-code'),
   submitAuth: document.querySelector('#submit-auth'),
@@ -90,8 +103,63 @@ function setConnection(mode, text) {
 function setBusy(value, label) {
   state.busy = value;
   elements.scanDirectory.disabled = value;
+  elements.addScanDirectory.disabled = value;
   elements.refreshCloud.disabled = value;
   if (label) elements.scanLabel.textContent = label;
+}
+
+function openScanDirectoryDatabase() {
+  if (!window.indexedDB) return Promise.resolve(null);
+  return new Promise(function (resolve, reject) {
+    const request = window.indexedDB.open(SCAN_DIRECTORY_DB, 1);
+    request.onupgradeneeded = function () {
+      if (!request.result.objectStoreNames.contains(SCAN_DIRECTORY_STORE)) {
+        request.result.createObjectStore(SCAN_DIRECTORY_STORE, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = function () { resolve(request.result); };
+    request.onerror = function () { reject(request.error); };
+  });
+}
+
+async function readStoredScanDirectories() {
+  const database = await openScanDirectoryDatabase();
+  if (!database) return [];
+  return new Promise(function (resolve, reject) {
+    const transaction = database.transaction(SCAN_DIRECTORY_STORE, 'readonly');
+    const request = transaction.objectStore(SCAN_DIRECTORY_STORE).getAll();
+    request.onsuccess = function () { resolve(request.result || []); };
+    request.onerror = function () { reject(request.error); };
+    transaction.oncomplete = function () { database.close(); };
+  });
+}
+
+async function storeScanDirectory(directory) {
+  const database = await openScanDirectoryDatabase();
+  if (!database) return;
+  return new Promise(function (resolve, reject) {
+    const transaction = database.transaction(SCAN_DIRECTORY_STORE, 'readwrite');
+    transaction.objectStore(SCAN_DIRECTORY_STORE).put({
+      id: directory.id,
+      label: directory.label,
+      path: directory.path,
+      custom: directory.custom,
+      handle: directory.handle
+    });
+    transaction.oncomplete = function () { database.close(); resolve(); };
+    transaction.onerror = function () { database.close(); reject(transaction.error); };
+  });
+}
+
+async function removeStoredScanDirectory(id) {
+  const database = await openScanDirectoryDatabase();
+  if (!database) return;
+  return new Promise(function (resolve, reject) {
+    const transaction = database.transaction(SCAN_DIRECTORY_STORE, 'readwrite');
+    transaction.objectStore(SCAN_DIRECTORY_STORE).delete(id);
+    transaction.oncomplete = function () { database.close(); resolve(); };
+    transaction.onerror = function () { database.close(); reject(transaction.error); };
+  });
 }
 
 async function apiRequest(pathname, options) {
@@ -282,9 +350,9 @@ async function walkForSkills(directoryHandle, rootName, pathSegments, depth, out
   }
 }
 
-async function scanDirectoryHandle(rootHandle) {
+async function scanDirectoryHandle(rootHandle, sourceLabel) {
   const found = [];
-  await walkForSkills(rootHandle, rootHandle.name, [], 0, found);
+  await walkForSkills(rootHandle, sourceLabel || rootHandle.name, [], 0, found);
   return found;
 }
 
@@ -340,6 +408,14 @@ function mergeLocalSkills(skills) {
   state.localSkills = [...merged.values()].sort(function (a, b) {
     return a.name.localeCompare(b.name, 'zh-CN');
   });
+}
+
+function replaceLocalSkillsForDirectory(directoryId, skills) {
+  state.localSkills = state.localSkills.filter(function (skill) {
+    return skill.scanDirectoryId !== directoryId;
+  });
+  for (const skill of skills) skill.scanDirectoryId = directoryId;
+  mergeLocalSkills(skills);
 }
 
 function findCloudSkill(localSkill) {
@@ -467,6 +543,70 @@ function createSkillCard(skill, source, index) {
 
   card.append(meta, title, description, details, actions);
   return card;
+}
+
+function scanDirectoryStatus(directory) {
+  if (directory.status === 'scanning') return { label: '扫描中', className: '' };
+  if (directory.status === 'ready') return { label: directory.skillCount + ' 个 Skill', className: 'synced' };
+  if (directory.status === 'error') return { label: '扫描失败', className: 'different' };
+  if (directory.handle) return { label: '需重新授权', className: 'missing' };
+  return { label: '待授权', className: 'missing' };
+}
+
+function createScanDirectoryCard(directory, index) {
+  const card = document.createElement('article');
+  card.className = 'scan-directory-card' + (directory.custom ? ' custom' : '');
+
+  const header = document.createElement('div');
+  header.className = 'scan-directory-card-header';
+  const title = document.createElement('strong');
+  title.textContent = directory.label;
+  const status = scanDirectoryStatus(directory);
+  const badge = document.createElement('span');
+  badge.className = 'status-badge ' + status.className;
+  badge.textContent = status.label;
+  header.append(title, badge);
+
+  const path = document.createElement('code');
+  path.textContent = directory.path;
+  path.title = directory.path;
+  const detail = document.createElement('small');
+  detail.textContent = directory.status === 'error'
+    ? (directory.error || '无法读取该目录')
+    : directory.handle
+      ? '已关联：' + directory.handle.name
+      : '首次授权后将保存到当前浏览器';
+
+  const actions = document.createElement('div');
+  actions.className = 'scan-directory-actions';
+  const authorizeLabel = directory.handle
+    ? directory.status === 'permission' ? '重新授权' : '更换目录'
+    : '授权目录';
+  const authorize = createButton(
+    authorizeLabel,
+    'authorize-directory',
+    index,
+    directory.handle ? 'secondary' : 'primary',
+    state.busy || typeof window.showDirectoryPicker !== 'function'
+  );
+  actions.append(authorize);
+  if (directory.custom) {
+    actions.append(createButton('移除', 'remove-directory', index, 'danger', state.busy));
+  }
+
+  card.append(header, path, detail, actions);
+  return card;
+}
+
+function renderScanDirectories() {
+  elements.scanDirectories.replaceChildren();
+  state.scanDirectories.forEach(function (directory, index) {
+    elements.scanDirectories.append(createScanDirectoryCard(directory, index));
+  });
+  const authorized = state.scanDirectories.filter(function (directory) { return Boolean(directory.handle); }).length;
+  const ready = state.scanDirectories.filter(function (directory) { return directory.status === 'ready'; }).length;
+  elements.scanDirectorySummary.textContent = '已授权 ' + authorized + ' / ' + state.scanDirectories.length +
+    (ready ? ' · 已扫描 ' + ready : '');
 }
 
 function render() {
@@ -770,31 +910,184 @@ async function deleteCloudSkill(index, button) {
   }
 }
 
-async function scanWithDirectoryPicker() {
-  const root = await window.showDirectoryPicker({ mode: 'read' });
-  setBusy(true, '正在扫描 ' + root.name);
-  const skills = await scanDirectoryHandle(root);
-  mergeLocalSkills(skills);
-  const skipped = skills.reduce(function (sum, skill) { return sum + skill.skippedSensitive; }, 0);
-  elements.scanLabel.textContent = root.name + ' · 找到 ' + skills.length + ' 个 Skill' +
-    (skipped ? ' · 已过滤 ' + skipped + ' 个敏感文件' : '');
-  render();
-  showToast('扫描完成');
+async function directoryHasReadPermission(directory) {
+  if (!directory.handle) return false;
+  if (typeof directory.handle.queryPermission !== 'function') return true;
+  return await directory.handle.queryPermission({ mode: 'read' }) === 'granted';
 }
 
-async function startScan() {
+async function scanConfiguredDirectory(directory) {
+  if (!directory.handle) return false;
+  if (!await directoryHasReadPermission(directory)) {
+    directory.status = 'permission';
+    directory.error = '';
+    renderScanDirectories();
+    return false;
+  }
+
+  directory.status = 'scanning';
+  directory.error = '';
+  renderScanDirectories();
+  try {
+    const skills = await scanDirectoryHandle(directory.handle, directory.label);
+    replaceLocalSkillsForDirectory(directory.id, skills);
+    directory.skillCount = skills.length;
+    directory.status = 'ready';
+    render();
+    renderScanDirectories();
+    return true;
+  } catch (error) {
+    directory.status = 'error';
+    directory.error = error.message;
+    renderScanDirectories();
+    return false;
+  }
+}
+
+async function scanAllConfiguredDirectories(automatic) {
+  if (state.busy) return;
+  if (typeof window.showDirectoryPicker !== 'function' || !window.isSecureContext) {
+    if (!automatic) elements.directoryInput.click();
+    return;
+  }
+
+  setBusy(true, automatic ? '正在自动扫描默认目录' : '正在扫描默认目录');
+  renderScanDirectories();
+  let scanned = 0;
+  try {
+    for (const directory of state.scanDirectories) {
+      if (await scanConfiguredDirectory(directory)) scanned += 1;
+    }
+    elements.scanLabel.textContent = scanned
+      ? '已扫描 ' + scanned + ' 个目录 · 找到 ' + state.localSkills.length + ' 个 Skill'
+      : '默认目录尚未授权';
+    if (!automatic) {
+      showToast(scanned ? '默认目录扫描完成' : '请先授权至少一个默认目录', !scanned);
+    }
+  } finally {
+    setBusy(false);
+    renderScanDirectories();
+  }
+}
+
+async function authorizeScanDirectory(index) {
+  const directory = state.scanDirectories[index];
+  if (!directory || state.busy) return;
+  if (typeof window.showDirectoryPicker !== 'function' || !window.isSecureContext) {
+    elements.directoryInput.click();
+    return;
+  }
+
+  try {
+    if (
+      directory.handle && directory.status === 'permission' &&
+      typeof directory.handle.requestPermission === 'function'
+    ) {
+      const permission = await directory.handle.requestPermission({ mode: 'read' });
+      if (permission !== 'granted') {
+        showToast('未获得该目录的读取权限', true);
+        return;
+      }
+    } else {
+      directory.handle = await window.showDirectoryPicker({ mode: 'read' });
+    }
+    directory.status = 'waiting';
+    directory.error = '';
+    try {
+      await storeScanDirectory(directory);
+    } catch {
+      showToast('目录可以扫描，但当前浏览器无法保存授权', true);
+    }
+    setBusy(true, '正在扫描 ' + directory.label);
+    await scanConfiguredDirectory(directory);
+    elements.scanLabel.textContent = directory.label + ' · 找到 ' + directory.skillCount + ' 个 Skill';
+    showToast(directory.label + ' 已设为默认扫描目录');
+  } catch (error) {
+    if (error.name !== 'AbortError') showToast(error.message, true);
+  } finally {
+    setBusy(false);
+    renderScanDirectories();
+  }
+}
+
+async function addScanDirectory() {
   if (state.busy) return;
   if (typeof window.showDirectoryPicker !== 'function' || !window.isSecureContext) {
     elements.directoryInput.click();
     return;
   }
+
   try {
-    await scanWithDirectoryPicker();
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    for (let index = 0; index < state.scanDirectories.length; index += 1) {
+      const existing = state.scanDirectories[index];
+      if (existing.handle && typeof existing.handle.isSameEntry === 'function' && await existing.handle.isSameEntry(handle)) {
+        showToast('该目录已经在默认扫描列表中');
+        return;
+      }
+    }
+    const directory = {
+      id: 'custom-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now()),
+      label: '自定义 · ' + handle.name,
+      path: handle.name,
+      custom: true,
+      handle: handle,
+      status: 'waiting',
+      skillCount: 0,
+      error: ''
+    };
+    state.scanDirectories.push(directory);
+    try {
+      await storeScanDirectory(directory);
+    } catch {
+      showToast('目录可以扫描，但当前浏览器无法保存授权', true);
+    }
+    setBusy(true, '正在扫描 ' + directory.label);
+    await scanConfiguredDirectory(directory);
+    elements.scanLabel.textContent = directory.label + ' · 找到 ' + directory.skillCount + ' 个 Skill';
+    showToast('已新增默认扫描目录');
   } catch (error) {
     if (error.name !== 'AbortError') showToast(error.message, true);
   } finally {
     setBusy(false);
+    renderScanDirectories();
   }
+}
+
+async function removeScanDirectory(index) {
+  const directory = state.scanDirectories[index];
+  if (!directory || !directory.custom || state.busy) return;
+  try {
+    await removeStoredScanDirectory(directory.id);
+    state.scanDirectories.splice(index, 1);
+    replaceLocalSkillsForDirectory(directory.id, []);
+    render();
+    renderScanDirectories();
+    showToast('已移除默认扫描目录');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function initializeScanDirectories() {
+  try {
+    const stored = await readStoredScanDirectories();
+    const storedById = new Map(stored.map(function (directory) { return [directory.id, directory]; }));
+    state.scanDirectories = DEFAULT_SCAN_DIRECTORIES.map(function (directory) {
+      const saved = storedById.get(directory.id);
+      return Object.assign({ handle: saved?.handle || null, status: 'waiting', skillCount: 0, error: '' }, directory);
+    });
+    for (const directory of stored) {
+      if (!directory.custom || DEFAULT_SCAN_DIRECTORIES.some(function (item) { return item.id === directory.id; })) continue;
+      state.scanDirectories.push(Object.assign({ status: 'waiting', skillCount: 0, error: '' }, directory));
+    }
+  } catch {
+    state.scanDirectories = DEFAULT_SCAN_DIRECTORIES.map(function (directory) {
+      return Object.assign({ handle: null, status: 'waiting', skillCount: 0, error: '' }, directory);
+    });
+  }
+  renderScanDirectories();
+  await scanAllConfiguredDirectories(true);
 }
 
 async function handleInputScan(event) {
@@ -835,7 +1128,15 @@ async function checkHealth() {
   }
 }
 
-elements.scanDirectory.addEventListener('click', startScan);
+elements.scanDirectory.addEventListener('click', function () { scanAllConfiguredDirectories(false); });
+elements.addScanDirectory.addEventListener('click', addScanDirectory);
+elements.scanDirectories.addEventListener('click', function (event) {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const index = Number(button.dataset.index);
+  if (button.dataset.action === 'authorize-directory') authorizeScanDirectory(index);
+  if (button.dataset.action === 'remove-directory') removeScanDirectory(index);
+});
 elements.loginLink.addEventListener('click', openAuthDialog);
 elements.authLoginTab.addEventListener('click', function () { setAuthMode('login'); });
 elements.authRegisterTab.addEventListener('click', function () { setAuthMode('register'); });
@@ -952,8 +1253,10 @@ elements.legacyForm.addEventListener('submit', async function (event) {
 
 render();
 renderAccount();
+renderScanDirectories();
 if (new URLSearchParams(window.location.search).has('auth_error')) {
   showToast('登录未完成，请重试', true);
   window.history.replaceState({}, '', window.location.pathname);
 }
 checkHealth();
+initializeScanDirectories();

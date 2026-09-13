@@ -6,7 +6,7 @@
   <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
   <title>Skill Dock｜个人同步与 Skill 社区</title>
   <link rel="icon" href="/icon.svg?v=2.2.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=2.2.0">
+  <link rel="stylesheet" href="/styles.css?v=2.3.0">
 </head>
 <body>
   <div class="page-shell">
@@ -37,7 +37,8 @@
           <p class="hero-copy">私有 Skill 仅自己可见；发布到社区后，其他用户才能浏览和下载。</p>
         </div>
         <div class="hero-actions">
-          <button id="scan-directory" class="button primary" type="button">扫描本机 Skill</button>
+          <button id="scan-directory" class="button primary" type="button">扫描默认目录</button>
+          <span class="hero-action-hint">首次授权一次，之后打开页面自动扫描</span>
           <button id="refresh-cloud" class="button secondary" type="button">刷新云端 Skill</button>
           <input id="directory-input" class="visually-hidden" type="file" webkitdirectory multiple>
         </div>
@@ -45,7 +46,19 @@
 
       <section class="privacy-note" aria-label="权限说明">
         <strong>浏览器权限边界</strong>
-        <span>扫描只读取你主动选择的目录；未上传的文件不会离开本机，敏感凭证文件会自动过滤。</span>
+        <span>默认目录首次需要浏览器授权；授权会保存在当前浏览器，之后打开页面自动扫描。未上传的文件不会离开本机。</span>
+      </section>
+
+      <section class="workspace scan-directory-workspace">
+        <div class="section-heading">
+          <div><p class="section-kicker">SCAN SOURCES</p><h2>默认扫描目录</h2></div>
+          <span id="scan-directory-summary" class="section-status">正在读取目录配置</span>
+        </div>
+        <div id="scan-directories" class="scan-directory-list"></div>
+        <div class="scan-directory-footer">
+          <button id="add-scan-directory" class="button secondary" type="button">＋ 新增默认目录</button>
+          <span>新增目录也会保存，并在下次打开时自动扫描。</span>
+        </div>
       </section>
 
       <section class="summary-grid" aria-label="同步概览">
@@ -63,7 +76,7 @@
         <div id="local-skills" class="skill-grid"></div>
         <div id="local-empty" class="empty-state">
           <strong>还没有本机清单</strong>
-          <span>选择 .codex/skills、.agents/skills 或其他 Skill 根目录开始扫描。</span>
+          <span>在上方授权至少一个默认目录后，Skill 会自动出现在这里。</span>
         </div>
       </section>
 
@@ -152,6 +165,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=2.2.0" defer></script>
+  <script src="/app.js?v=2.3.0" defer></script>
 </body>
 </html>
