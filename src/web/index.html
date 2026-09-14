@@ -6,7 +6,7 @@
   <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
   <title>Skill Dock｜个人同步与 Skill 社区</title>
   <link rel="icon" href="/icon.svg?v=2.2.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=2.4.0">
+  <link rel="stylesheet" href="/styles.css?v=2.4.1">
 </head>
 <body>
   <div class="page-shell">
@@ -52,15 +52,19 @@
       <section class="helper-panel" aria-label="本地助手">
         <div>
           <p class="section-kicker">LOCAL HELPER</p>
-          <div class="helper-title-row">
-            <h2>本地扫描助手</h2>
-            <span id="helper-status" class="status-badge missing">未连接</span>
-          </div>
+          <h2>本地扫描助手</h2>
           <p id="helper-copy">试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。</p>
         </div>
         <div class="helper-actions">
-          <a class="button primary" href="/helper/start-skill-dock-helper.cmd" download="启动 Skill Dock 助手.cmd">下载 Windows 助手</a>
-          <button id="detect-helper" class="button secondary" type="button">重新检测</button>
+          <div id="helper-status" class="helper-connection-status disconnected" role="status" aria-live="polite">
+            <span class="helper-status-dot" aria-hidden="true"></span>
+            <strong id="helper-status-label">未连接</strong>
+            <small id="helper-status-version"></small>
+          </div>
+          <div class="helper-action-links">
+            <a class="helper-download-link" href="/helper/start-skill-dock-helper.cmd" download="启动 Skill Dock 助手.cmd">下载 Windows 助手 ↓</a>
+            <button id="detect-helper" class="text-button" type="button">重新检测</button>
+          </div>
         </div>
       </section>
 
@@ -180,6 +184,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=2.4.0" defer></script>
+  <script src="/app.js?v=2.4.1" defer></script>
 </body>
 </html>

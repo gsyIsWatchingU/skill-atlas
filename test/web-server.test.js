@@ -173,7 +173,10 @@ test('网页提供本地助手启动器并允许连接回环地址', async (t) =
   const home = await fetch(baseUrl + '/');
   assert.equal(home.status, 200);
   assert.match(home.headers.get('content-security-policy'), /http:\/\/127\.0\.0\.1:18787/);
-  assert.match(await home.text(), /下载 Windows 助手/);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /class="helper-download-link"[^>]*>下载 Windows 助手/);
+  assert.match(homeHtml, /class="helper-connection-status disconnected"[^>]*role="status"/);
+  assert.match(homeHtml, /id="detect-helper" class="text-button"[^>]*>重新检测/);
 
   const launcher = await fetch(baseUrl + '/helper/start-skill-dock-helper.cmd');
   assert.equal(launcher.status, 200);

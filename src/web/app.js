@@ -66,6 +66,8 @@ const elements = {
   directoryInput: document.querySelector('#directory-input'),
   helperCopy: document.querySelector('#helper-copy'),
   helperStatus: document.querySelector('#helper-status'),
+  helperStatusLabel: document.querySelector('#helper-status-label'),
+  helperStatusVersion: document.querySelector('#helper-status-version'),
   legacyDialog: document.querySelector('#legacy-dialog'),
   legacyForm: document.querySelector('#legacy-form'),
   legacyToken: document.querySelector('#legacy-token'),
@@ -207,17 +209,21 @@ function storedHelperToken() {
 }
 
 function renderHelper() {
-  elements.helperStatus.className = 'status-badge ' + (state.helper.connected ? 'synced' : 'missing');
-  elements.helperStatus.textContent = state.helper.connected
-    ? '已连接 · v' + state.helper.version
+  const status = state.helper.connected ? 'connected' : state.helper.token ? 'pending' : 'disconnected';
+  elements.helperStatus.className = 'helper-connection-status ' + status;
+  elements.helperStatusLabel.textContent = state.helper.connected
+    ? '已连接'
     : state.helper.token ? '等待连接' : '未连接';
+  elements.helperStatusVersion.textContent = state.helper.connected && state.helper.version
+    ? 'v' + state.helper.version
+    : '';
   elements.helperCopy.textContent = state.helper.connected
     ? '已启用只读直达扫描；默认目录无需浏览器授权。'
     : state.helper.token
       ? '请保持助手窗口开启，并允许 Chrome 访问本地网络。'
       : '试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。';
   elements.detectHelper.disabled = state.busy;
-  elements.detectHelper.textContent = state.helper.connected ? '已连接' : '重新检测';
+  elements.detectHelper.textContent = '重新检测';
 }
 
 async function helperRequest(pathname, timeoutMs) {
