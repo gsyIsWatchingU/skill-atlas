@@ -210,10 +210,12 @@ function renderHelper() {
   elements.helperStatus.className = 'status-badge ' + (state.helper.connected ? 'synced' : 'missing');
   elements.helperStatus.textContent = state.helper.connected
     ? '已连接 · v' + state.helper.version
-    : state.helper.token ? '助手未启动' : '未连接';
+    : state.helper.token ? '等待连接' : '未连接';
   elements.helperCopy.textContent = state.helper.connected
     ? '已启用只读直达扫描；默认目录无需浏览器授权。'
-    : '试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。';
+    : state.helper.token
+      ? '请保持助手窗口开启，并允许 Chrome 访问本地网络。'
+      : '试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。';
   elements.detectHelper.disabled = state.busy;
   elements.detectHelper.textContent = state.helper.connected ? '已连接' : '重新检测';
 }
@@ -259,7 +261,10 @@ async function detectHelper(silent) {
   }
   renderHelper();
   renderScanDirectories();
-  if (!silent) showToast(state.helper.connected ? '本地助手已连接' : '未检测到本地助手', !state.helper.connected);
+  if (!silent) showToast(
+    state.helper.connected ? '本地助手已连接' : '请保持助手运行，并允许浏览器访问本地网络',
+    !state.helper.connected
+  );
   return state.helper.connected;
 }
 
