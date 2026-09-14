@@ -4,6 +4,8 @@ const MAX_SCAN_DEPTH = 12;
 const SKIP_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', '__pycache__', 'dist', 'build', 'coverage']);
 const SCAN_DIRECTORY_DB = 'skill-dock-local';
 const SCAN_DIRECTORY_STORE = 'scan-directories';
+const HELPER_BASE_URL = 'http://127.0.0.1:18787';
+const HELPER_TOKEN_STORAGE = 'skill-dock-helper-token';
 const DEFAULT_SCAN_DIRECTORIES = [
   { id: 'codex-user', label: 'Codex 个人 Skill', path: '%USERPROFILE%\\.codex\\skills', custom: false },
   { id: 'shared-agents', label: '跨 Agent 共享 Skill', path: '%USERPROFILE%\\.agents\\skills', custom: false },
@@ -19,7 +21,13 @@ const state = {
   communitySkills: [],
   user: null,
   busy: false,
-  authMode: 'login'
+  authMode: 'login',
+  helper: {
+    token: '',
+    connected: false,
+    version: '',
+    roots: {}
+  }
 };
 
 const elements = {
@@ -54,7 +62,10 @@ const elements = {
   connectionDot: document.querySelector('#connection-dot'),
   connectionText: document.querySelector('#connection-text'),
   differentCount: document.querySelector('#different-count'),
+  detectHelper: document.querySelector('#detect-helper'),
   directoryInput: document.querySelector('#directory-input'),
+  helperCopy: document.querySelector('#helper-copy'),
+  helperStatus: document.querySelector('#helper-status'),
   legacyDialog: document.querySelector('#legacy-dialog'),
   legacyForm: document.querySelector('#legacy-form'),
   legacyToken: document.querySelector('#legacy-token'),
@@ -174,6 +185,132 @@ async function apiRequest(pathname, options) {
     throw error;
   }
   return result;
+}
+
+function helperTokenFromLocation() {
+  const token = new URLSearchParams(window.location.hash.slice(1)).get('helper') || '';
+  if (!/^[A-Za-z0-9_-]{32,}$/.test(token)) return '';
+  try {
+    window.localStorage.setItem(HELPER_TOKEN_STORAGE, token);
+  } catch {}
+  window.history.replaceState({}, '', window.location.pathname + window.location.search);
+  return token;
+}
+
+function storedHelperToken() {
+  try {
+    const token = window.localStorage.getItem(HELPER_TOKEN_STORAGE) || '';
+    return /^[A-Za-z0-9_-]{32,}$/.test(token) ? token : '';
+  } catch {
+    return '';
+  }
+}
+
+function renderHelper() {
+  elements.helperStatus.className = 'status-badge ' + (state.helper.connected ? 'synced' : 'missing');
+  elements.helperStatus.textContent = state.helper.connected
+    ? '已连接 · v' + state.helper.version
+    : state.helper.token ? '助手未启动' : '未连接';
+  elements.helperCopy.textContent = state.helper.connected
+    ? '已启用只读直达扫描；默认目录无需浏览器授权。'
+    : '试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。';
+  elements.detectHelper.disabled = state.busy;
+  elements.detectHelper.textContent = state.helper.connected ? '已连接' : '重新检测';
+}
+
+async function helperRequest(pathname, timeoutMs) {
+  if (!state.helper.token) throw new Error('本地助手尚未配对');
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, timeoutMs || 3000);
+  try {
+    const response = await fetch(HELPER_BASE_URL + pathname, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + state.helper.token },
+      cache: 'no-store',
+      signal: controller.signal,
+      targetAddressSpace: 'loopback'
+    });
+    const result = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(result.error || '本地助手请求失败（' + response.status + '）');
+    return result;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('本地助手响应超时');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function detectHelper(silent) {
+  if (!state.helper.token) {
+    state.helper.connected = false;
+    renderHelper();
+    renderScanDirectories();
+    if (!silent) showToast('请先下载并启动本地助手', true);
+    return false;
+  }
+  try {
+    const health = await helperRequest('/v1/health', 1800);
+    state.helper.connected = Boolean(health.ok);
+    state.helper.version = health.version || '';
+  } catch {
+    state.helper.connected = false;
+    state.helper.version = '';
+  }
+  renderHelper();
+  renderScanDirectories();
+  if (!silent) showToast(state.helper.connected ? '本地助手已连接' : '未检测到本地助手', !state.helper.connected);
+  return state.helper.connected;
+}
+
+function applyHelperScan(result) {
+  state.helper.roots = {};
+  for (const root of result.roots || []) state.helper.roots[root.id] = root;
+  for (const directory of DEFAULT_SCAN_DIRECTORIES) {
+    const skills = (result.skills || []).filter(function (skill) {
+      return skill.scanDirectoryId === directory.id;
+    });
+    replaceLocalSkillsForDirectory(directory.id, skills);
+  }
+  render();
+  renderScanDirectories();
+}
+
+async function scanWithHelper(automatic) {
+  if (state.busy) return false;
+  if (!state.helper.connected && !await detectHelper(true)) {
+    if (!automatic) showToast('请先启动本地助手；也可使用浏览器授权备用模式', true);
+    return false;
+  }
+  setBusy(true, '本地助手正在扫描默认目录');
+  renderHelper();
+  try {
+    const result = await helperRequest('/v1/scan', 120000);
+    applyHelperScan(result);
+    const ready = (result.roots || []).filter(function (root) { return root.status === 'ready'; }).length;
+    elements.scanLabel.textContent = '助手已扫描 ' + ready + ' 个目录 · 找到 ' + (result.skills || []).length + ' 个 Skill';
+    if (!automatic) showToast('本地助手扫描完成');
+    return true;
+  } catch (error) {
+    state.helper.connected = false;
+    if (!automatic) showToast(error.message, true);
+    return false;
+  } finally {
+    setBusy(false);
+    renderHelper();
+    renderScanDirectories();
+  }
+}
+
+async function scanDefaultSources() {
+  if (state.helper.token && await scanWithHelper(false)) return;
+  await scanAllConfiguredDirectories(false);
+}
+
+async function initializeHelper() {
+  state.helper.token = helperTokenFromLocation() || storedHelperToken();
+  renderHelper();
+  return detectHelper(true);
 }
 
 function setAuthMessage(message, isError) {
@@ -491,7 +628,9 @@ function createSkillCard(skill, source, index) {
   if (source === 'local') {
     const cloud = findCloudSkill(skill);
     const sameVersion = cloud && cloud.versionHash === skill.versionHash;
-    const canUpload = skill.ownership !== 'system' && skill.files.length > 0;
+    const canUpload = skill.ownership !== 'system' && (
+      Boolean(skill.helperSkillId) || (Array.isArray(skill.files) && skill.files.length > 0)
+    );
     if (!state.user && canUpload) {
       actions.append(createButton('登录后上传', 'login', index, 'primary', false, source));
     } else if (canUpload) {
@@ -546,6 +685,13 @@ function createSkillCard(skill, source, index) {
 }
 
 function scanDirectoryStatus(directory) {
+  const helperRoot = !directory.custom && state.helper.connected
+    ? state.helper.roots[directory.id]
+    : null;
+  if (helperRoot?.status === 'ready') return { label: helperRoot.skillCount + ' 个 Skill', className: 'synced' };
+  if (helperRoot?.status === 'missing') return { label: '目录不存在', className: 'missing' };
+  if (helperRoot?.status === 'error') return { label: '扫描失败', className: 'different' };
+  if (!directory.custom && state.helper.connected) return { label: '助手待扫描', className: '' };
   if (directory.status === 'scanning') return { label: '扫描中', className: '' };
   if (directory.status === 'ready') return { label: directory.skillCount + ' 个 Skill', className: 'synced' };
   if (directory.status === 'error') return { label: '扫描失败', className: 'different' };
@@ -571,30 +717,41 @@ function createScanDirectoryCard(directory, index) {
   path.textContent = directory.path;
   path.title = directory.path;
   const detail = document.createElement('small');
-  detail.textContent = directory.status === 'error'
+  const helperRoot = !directory.custom && state.helper.connected
+    ? state.helper.roots[directory.id]
+    : null;
+  detail.textContent = helperRoot?.status === 'ready'
+    ? '本地助手直接读取，无需浏览器授权'
+    : helperRoot?.status === 'missing'
+      ? '当前电脑中没有此目录'
+      : helperRoot?.status === 'error'
+        ? (helperRoot.error || '助手无法读取该目录')
+        : directory.status === 'error'
     ? (directory.error || '无法读取该目录')
     : directory.handle
       ? '已关联：' + directory.handle.name
       : directory.custom
         ? '首次授权后将保存到当前浏览器'
-        : '先复制路径，再授权并粘贴到弹窗地址栏';
+        : '启动助手可直接扫描；浏览器授权为备用模式';
 
   const actions = document.createElement('div');
   actions.className = 'scan-directory-actions';
-  if (!directory.custom) {
+  if (!directory.custom && !state.helper.connected) {
     actions.append(createButton('复制路径', 'copy-directory-path', index, 'secondary', state.busy));
   }
-  const authorizeLabel = directory.handle
-    ? directory.status === 'permission' ? '重新授权' : '更换目录'
-    : '授权目录';
-  const authorize = createButton(
-    authorizeLabel,
-    'authorize-directory',
-    index,
-    directory.handle ? 'secondary' : 'primary',
-    state.busy || typeof window.showDirectoryPicker !== 'function'
-  );
-  actions.append(authorize);
+  if (directory.custom || !state.helper.connected) {
+    const authorizeLabel = directory.handle
+      ? directory.status === 'permission' ? '重新授权' : '更换目录'
+      : directory.custom ? '授权目录' : '浏览器授权';
+    const authorize = createButton(
+      authorizeLabel,
+      'authorize-directory',
+      index,
+      directory.handle ? 'secondary' : 'primary',
+      state.busy || typeof window.showDirectoryPicker !== 'function'
+    );
+    actions.append(authorize);
+  }
   if (directory.custom) {
     actions.append(createButton('移除', 'remove-directory', index, 'danger', state.busy));
   }
@@ -608,10 +765,16 @@ function renderScanDirectories() {
   state.scanDirectories.forEach(function (directory, index) {
     elements.scanDirectories.append(createScanDirectoryCard(directory, index));
   });
-  const authorized = state.scanDirectories.filter(function (directory) { return Boolean(directory.handle); }).length;
-  const ready = state.scanDirectories.filter(function (directory) { return directory.status === 'ready'; }).length;
-  elements.scanDirectorySummary.textContent = '已授权 ' + authorized + ' / ' + state.scanDirectories.length +
-    (ready ? ' · 已扫描 ' + ready : '');
+  if (state.helper.connected) {
+    const helperRoots = Object.values(state.helper.roots);
+    const ready = helperRoots.filter(function (root) { return root.status === 'ready'; }).length;
+    elements.scanDirectorySummary.textContent = '助手已连接' + (helperRoots.length ? ' · 已扫描 ' + ready + ' / 3' : '');
+  } else {
+    const authorized = state.scanDirectories.filter(function (directory) { return Boolean(directory.handle); }).length;
+    const ready = state.scanDirectories.filter(function (directory) { return directory.status === 'ready'; }).length;
+    elements.scanDirectorySummary.textContent = '浏览器已授权 ' + authorized + ' / ' + state.scanDirectories.length +
+      (ready ? ' · 已扫描 ' + ready : '');
+  }
 }
 
 function render() {
@@ -690,6 +853,9 @@ async function fileToBase64(file) {
 }
 
 async function packageLocalSkill(skill) {
+  if (skill.helperSkillId) {
+    return helperRequest('/v1/skills/' + encodeURIComponent(skill.helperSkillId) + '/package', 120000);
+  }
   const files = [];
   for (const entry of skill.files) {
     files.push({ path: entry.path, contentBase64: await fileToBase64(entry.file) });
@@ -935,6 +1101,9 @@ async function scanConfiguredDirectory(directory) {
   renderScanDirectories();
   try {
     const skills = await scanDirectoryHandle(directory.handle, directory.label);
+    if (directory.id === 'codex-plugins') {
+      for (const skill of skills) skill.ownership = 'system';
+    }
     replaceLocalSkillsForDirectory(directory.id, skills);
     directory.skillCount = skills.length;
     directory.status = 'ready';
@@ -1107,7 +1276,6 @@ async function initializeScanDirectories() {
     });
   }
   renderScanDirectories();
-  await scanAllConfiguredDirectories(true);
 }
 
 async function handleInputScan(event) {
@@ -1148,8 +1316,11 @@ async function checkHealth() {
   }
 }
 
-elements.scanDirectory.addEventListener('click', function () { scanAllConfiguredDirectories(false); });
+elements.scanDirectory.addEventListener('click', scanDefaultSources);
 elements.addScanDirectory.addEventListener('click', addScanDirectory);
+elements.detectHelper.addEventListener('click', async function () {
+  if (await detectHelper(false)) await scanWithHelper(false);
+});
 elements.scanDirectories.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
@@ -1274,10 +1445,17 @@ elements.legacyForm.addEventListener('submit', async function (event) {
 
 render();
 renderAccount();
+renderHelper();
 renderScanDirectories();
 if (new URLSearchParams(window.location.search).has('auth_error')) {
   showToast('登录未完成，请重试', true);
   window.history.replaceState({}, '', window.location.pathname);
 }
 checkHealth();
-initializeScanDirectories();
+const helperInitialization = initializeHelper();
+helperInitialization.then(function (connected) {
+  if (connected) scanWithHelper(true);
+});
+Promise.all([initializeScanDirectories(), helperInitialization]).then(function (results) {
+  if (!results[1]) scanAllConfiguredDirectories(true);
+});

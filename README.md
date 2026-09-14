@@ -4,7 +4,8 @@
 
 ## 功能
 
-- 浏览器授权后扫描 **.codex/skills**、**.agents/skills** 等目录。
+- Windows 本地助手可直接扫描 **.codex/skills**、**.agents/skills** 和 Codex 插件缓存，无需选择文件夹。
+- 浏览器目录授权保留为自定义目录和无助手场景的备用方式。
 - Chrome / Edge 可把云端 Skill 直接写入用户授权的目录。
 - PostgreSQL 存储 Skill、版本和每个文件的二进制内容。
 - 通过 SHA-256 判断本机缺失、已同步和版本不同。
@@ -12,14 +13,14 @@
 - 通过本站邮箱密码表单接入统一账号，注册需邮箱验证码，私有 Skill 按账号隔离。
 - Skill 可在私有与社区两种可见性之间切换；社区 Skill 支持公开浏览和下载。
 
-浏览器不能静默遍历电脑。每个目录都必须由用户主动选择；公网环境必须使用 HTTPS。
+浏览器不能静默遍历电脑。默认目录可由只监听 `127.0.0.1` 的只读助手扫描；未启动助手时，仍需用户主动授权目录。公网环境必须使用 HTTPS。
 
 ## 架构
 
 ~~~text
 Algorithm Lab 统一账号 API（保留 SSO + PKCE 兼容）
       ↓
-浏览器目录授权 → Skill Dock Web
+Windows 只读助手 / 浏览器目录授权 → Skill Dock Web
       ↓
 GPU PostgreSQL
 skill_users → skills → skill_versions → skill_files(BYTEA)
@@ -39,6 +40,21 @@ npm run dev
 ~~~
 
 访问 **http://127.0.0.1:8787**。
+
+本地助手默认连接公网 Skill Dock；启动后会自动打开已配对页面：
+
+~~~powershell
+npm run helper
+~~~
+
+调试本地网页时可指定地址：
+
+~~~powershell
+$env:SKILL_DOCK_URL = "http://127.0.0.1:8787"
+npm run helper
+~~~
+
+助手只读三个内置目录，配对令牌保存在当前 Windows 用户目录中；关闭助手窗口即可停止。
 
 ## GPU 部署
 
@@ -87,6 +103,7 @@ bash /workspace/projects/skill-atlas/current/deploy/verify-public.sh
 npm test
 node --check src/web-server.js
 node --check src/web/app.js
+node --check src/web/helper/skill-dock-helper.js
 ~~~
 
 ~~~bash

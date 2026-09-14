@@ -160,6 +160,27 @@ test('计算稳定版本并拒绝不安全路径', () => {
   assert.throws(() => validatePackage(payload), /不安全的文件路径/);
 });
 
+test('网页提供本地助手启动器并允许连接回环地址', async (t) => {
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({ repository });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+  });
+
+  const home = await fetch(baseUrl + '/');
+  assert.equal(home.status, 200);
+  assert.match(home.headers.get('content-security-policy'), /http:\/\/127\.0\.0\.1:18787/);
+  assert.match(await home.text(), /下载 Windows 助手/);
+
+  const launcher = await fetch(baseUrl + '/helper/start-skill-dock-helper.cmd');
+  assert.equal(launcher.status, 200);
+  assert.match(await launcher.text(), /skill-dock-helper\.js\?v=0\.1\.0/);
+  assert.equal((await fetch(baseUrl + '/helper/skill-dock-helper.js')).status, 200);
+});
+
 test('站内邮箱表单调用统一账号服务并建立本站会话', async (t) => {
   const repository = createMemoryRepository();
   const calls = [];

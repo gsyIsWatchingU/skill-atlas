@@ -620,7 +620,7 @@ async function serveStatic(response, pathname) {
     response.writeHead(200, {
       'Content-Type': CONTENT_TYPES[path.extname(resolved)] || 'application/octet-stream',
       'Cache-Control': path.extname(resolved) === '.html' ? 'no-cache' : 'public, max-age=300',
-      'Content-Security-Policy': "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      'Content-Security-Policy': "default-src 'self'; connect-src 'self' http://127.0.0.1:18787 http://localhost:18787; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer'
     });

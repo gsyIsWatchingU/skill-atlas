@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/web-server.js",
     "dev": "node --watch src/web-server.js",
-    "test": "node --test test/web-server.test.js"
+    "helper": "node src/web/helper/skill-dock-helper.js",
+    "test": "node --test test/helper.test.js test/web-server.test.js"
   },
   "engines": {
     "node": ">=20"

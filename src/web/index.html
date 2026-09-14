@@ -6,7 +6,7 @@
   <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
   <title>Skill Dock｜个人同步与 Skill 社区</title>
   <link rel="icon" href="/icon.svg?v=2.2.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=2.3.1">
+  <link rel="stylesheet" href="/styles.css?v=2.4.0">
 </head>
 <body>
   <div class="page-shell">
@@ -38,15 +38,30 @@
         </div>
         <div class="hero-actions">
           <button id="scan-directory" class="button primary" type="button">扫描默认目录</button>
-          <span class="hero-action-hint">首次授权一次，之后打开页面自动扫描</span>
+          <span class="hero-action-hint">连接本地助手后，无需选择文件夹</span>
           <button id="refresh-cloud" class="button secondary" type="button">刷新云端 Skill</button>
           <input id="directory-input" class="visually-hidden" type="file" webkitdirectory multiple>
         </div>
       </section>
 
       <section class="privacy-note" aria-label="权限说明">
-        <strong>浏览器权限边界</strong>
-        <span>默认目录首次需要浏览器授权；授权会保存在当前浏览器，之后打开页面自动扫描。未上传的文件不会离开本机。</span>
+        <strong>本机读取边界</strong>
+        <span>助手只读默认 Skill 目录，且仅监听本机地址。扫描结果留在浏览器，点击同步或发布后才会上传。</span>
+      </section>
+
+      <section class="helper-panel" aria-label="本地助手">
+        <div>
+          <p class="section-kicker">LOCAL HELPER</p>
+          <div class="helper-title-row">
+            <h2>本地扫描助手</h2>
+            <span id="helper-status" class="status-badge missing">未连接</span>
+          </div>
+          <p id="helper-copy">试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。</p>
+        </div>
+        <div class="helper-actions">
+          <a class="button primary" href="/helper/start-skill-dock-helper.cmd" download="启动 Skill Dock 助手.cmd">下载 Windows 助手</a>
+          <button id="detect-helper" class="button secondary" type="button">重新检测</button>
+        </div>
       </section>
 
       <section class="workspace scan-directory-workspace">
@@ -57,7 +72,7 @@
         <div id="scan-directories" class="scan-directory-list"></div>
         <div class="scan-directory-footer">
           <button id="add-scan-directory" class="button secondary" type="button">＋ 新增默认目录</button>
-          <span>首次授权：复制对应路径 → 授权目录 → 在弹窗地址栏粘贴并回车。新增目录也会保存。</span>
+          <span>三个内置目录由助手直接扫描；新增的自定义目录仍由浏览器授权并保存。</span>
         </div>
       </section>
 
@@ -165,6 +180,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=2.3.1" defer></script>
+  <script src="/app.js?v=2.4.0" defer></script>
 </body>
 </html>

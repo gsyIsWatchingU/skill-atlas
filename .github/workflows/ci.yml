@@ -40,6 +40,7 @@ jobs:
         run: |
           node --check src/web-server.js
           node --check src/web/app.js
+          node --check src/web/helper/skill-dock-helper.js
 
       - name: 生成部署包
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
