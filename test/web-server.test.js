@@ -174,6 +174,7 @@ test('网页提供本地助手启动器并允许连接回环地址', async (t) =
   assert.equal(home.status, 200);
   assert.match(home.headers.get('content-security-policy'), /http:\/\/127\.0\.0\.1:18787/);
   const homeHtml = await home.text();
+  assert.match(homeHtml, /icon\.svg\?v=2\.3\.0/);
   assert.match(homeHtml, /class="helper-download-link"[^>]*>下载 Windows 助手/);
   assert.match(homeHtml, /class="helper-connection-status disconnected"[^>]*role="status"/);
   assert.match(homeHtml, /id="detect-helper" class="text-button"[^>]*>重新检测/);
@@ -182,6 +183,10 @@ test('网页提供本地助手启动器并允许连接回环地址', async (t) =
   assert.equal(launcher.status, 200);
   assert.match(await launcher.text(), /skill-dock-helper\.js\?v=0\.1\.0/);
   assert.equal((await fetch(baseUrl + '/helper/skill-dock-helper.js')).status, 200);
+
+  const icon = await fetch(baseUrl + '/icon.svg');
+  assert.equal(icon.status, 200);
+  assert.match(await icon.text(), /rx="224" fill="#fff"/);
 });
 
 test('站内邮箱表单调用统一账号服务并建立本站会话', async (t) => {
