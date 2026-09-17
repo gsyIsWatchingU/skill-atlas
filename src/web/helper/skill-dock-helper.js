@@ -102,26 +102,140 @@ function computeVersionHash(files) {
   return hash.digest('hex');
 }
 
-async function collectDirectoryFiles(directoryPath, prefix, depth, result) {
+// 产品把 Skill 以符号链接 / junction 落进项目目录来实现隔离（见 docs/solution.md §5），
+// 所以扫描器必须跟随链接，否则隔离做完当天就什么都扫不到。
+// 跟随的前提是"跟随了什么、跳到哪去"完全可见，因此每类结果都要留记录，不能静默跳过。
+const LINK_BUCKETS = ['followed', 'outsideRoot', 'broken', 'cycle', 'denied', 'notFollowed'];
+
+function createLinkState(allowedRealRoots, followLinks) {
+  const links = {};
+  for (const bucket of LINK_BUCKETS) links[bucket] = [];
+  return {
+    followLinks: followLinks !== false,
+    allowedRealRoots,
+    visitedRealDirs: new Set(),
+    // 入口遍历会先解析一次链接，文件收集随后还会碰到同一链接；同一个链接只应有一份结果。
+    recordedLinks: new Set(),
+    realpathCache: new Map(),
+    links
+  };
+}
+
+function recordLink(state, bucket, linkPath, target, error) {
+  if (state.recordedLinks.has(linkPath)) return;
+  state.recordedLinks.add(linkPath);
+  state.links[bucket].push({ linkPath, target: target || '', error: error || '' });
+}
+
+// realpath 有成本，所以只在链接项上调用，并对同一路径缓存结果。
+async function canonicalPath(filePath, state) {
+  if (state.realpathCache.has(filePath)) return state.realpathCache.get(filePath);
+  let resolved;
+  try {
+    resolved = await fs.realpath(filePath);
+  } catch (error) {
+    resolved = { error: error.code || 'EIO' };
+  }
+  state.realpathCache.set(filePath, resolved);
+  return resolved;
+}
+
+// 判断目标是否落在任一扫描根内。不能用 startsWith——/project 会误判成 /project-secret。
+function findContainingRoot(state, targetReal) {
+  return state.allowedRealRoots.find((rootReal) => {
+    const relative = path.relative(rootReal, targetReal);
+    if (relative === '') return true;
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  }) || null;
+}
+
+async function markDirectoryVisited(directoryPath, state) {
+  const resolved = await canonicalPath(directoryPath, state);
+  if (typeof resolved === 'string') state.visitedRealDirs.add(resolved);
+}
+
+// 返回 'directory' | 'file'；无法安全处理时返回 null，原因已记入 state.links。
+async function resolveEntryLink(absolutePath, state) {
+  if (!state.followLinks) {
+    recordLink(state, 'notFollowed', absolutePath);
+    return null;
+  }
+
+  const resolved = await canonicalPath(absolutePath, state);
+  if (typeof resolved !== 'string') {
+    recordLink(state, 'broken', absolutePath, '', resolved.error);
+    return null;
+  }
+
+  let stat;
+  try {
+    stat = await fs.stat(absolutePath);
+  } catch (error) {
+    recordLink(state, 'denied', absolutePath, resolved, error.code || 'EACCES');
+    return null;
+  }
+
+  if (!stat.isDirectory() && !stat.isFile()) return null;
+
+  // 成环要先于记账：目标已经在遍历里出现过的话，这次不会真的进去，
+  // 若先记成 followed，报告里的"跟随数"就会包含一个并没有跟随的链接。
+  if (stat.isDirectory() && state.visitedRealDirs.has(resolved)) {
+    recordLink(state, 'cycle', absolutePath, resolved);
+    return null;
+  }
+
+  if (findContainingRoot(state, resolved)) {
+    recordLink(state, 'followed', absolutePath, resolved);
+  } else {
+    // 隔离场景天然跳出扫描根（项目 -> 中央 Skill 仓库），所以这里是"记下来"而不是"拒绝"。
+    recordLink(state, 'outsideRoot', absolutePath, resolved);
+  }
+
+  return stat.isDirectory() ? 'directory' : 'file';
+}
+
+async function collectDirectoryFiles(directoryPath, prefix, depth, result, state) {
   if (depth > MAX_SCAN_DEPTH) return;
+  const linkState = state || createLinkState([], true);
+  await markDirectoryVisited(directoryPath, linkState);
   const entries = await fs.readdir(directoryPath, { withFileTypes: true });
   entries.sort((a, b) => comparePath(a.name, b.name));
 
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) continue;
     const absolutePath = path.join(directoryPath, entry.name);
-    if (entry.isDirectory()) {
-      if (!SKIP_DIRECTORIES.has(entry.name.toLocaleLowerCase('en-US'))) {
-        await collectDirectoryFiles(absolutePath, `${prefix}${entry.name}/`, depth + 1, result);
-      }
+    const lowerName = entry.name.toLocaleLowerCase('en-US');
+    let kind;
+
+    if (entry.isSymbolicLink()) {
+      // 目录链接包含 Windows junction：两者在 readdir 里都报 isSymbolicLink。
+      kind = await resolveEntryLink(absolutePath, linkState);
+      if (!kind) continue;
+    } else if (entry.isDirectory()) {
+      if (SKIP_DIRECTORIES.has(lowerName)) continue;
+      kind = 'directory';
+    } else if (entry.isFile()) {
+      kind = 'file';
+    } else {
       continue;
     }
-    if (!entry.isFile()) continue;
+
+    if (kind === 'directory') {
+      await collectDirectoryFiles(absolutePath, `${prefix}${entry.name}/`, depth + 1, result, linkState);
+      continue;
+    }
+
     if (shouldSkipFile(entry.name)) {
       result.skippedSensitive += 1;
       continue;
     }
-    const content = await fs.readFile(absolutePath);
+    // 哈希与上传都用逻辑路径：同一个 Skill 通过不同链接路径被发现时结果必须一致。
+    let content;
+    try {
+      content = await fs.readFile(absolutePath);
+    } catch (error) {
+      recordLink(linkState, 'denied', absolutePath, '', error.code || 'EACCES');
+      continue;
+    }
     result.sizeBytes += content.length;
     if (result.sizeBytes > MAX_SKILL_BYTES) throw new Error('单个 Skill 不能超过 20 MB');
     result.files.push({ path: `${prefix}${entry.name}`, content });
@@ -129,7 +243,7 @@ async function collectDirectoryFiles(directoryPath, prefix, depth, result) {
   }
 }
 
-async function createLocalSkill(directoryPath, root, relativeSegments, token) {
+async function createLocalSkill(directoryPath, root, relativeSegments, token, state) {
   const entries = await fs.readdir(directoryPath, { withFileTypes: true });
   const skillEntry = entries.find((entry) => (
     entry.isFile() && entry.name.toLocaleLowerCase('en-US') === 'skill.md'
@@ -139,7 +253,7 @@ async function createLocalSkill(directoryPath, root, relativeSegments, token) {
   const skillFile = await fs.readFile(path.join(directoryPath, skillEntry.name), 'utf8');
   const metadata = parseFrontmatter(skillFile, path.basename(directoryPath));
   const collected = { files: [], sizeBytes: 0, skippedSensitive: 0 };
-  await collectDirectoryFiles(directoryPath, '', 0, collected);
+  await collectDirectoryFiles(directoryPath, '', 0, collected, state);
   const helperSkillId = createHmac('sha256', token)
     .update(path.resolve(directoryPath).toLocaleLowerCase('en-US'))
     .digest('hex');
@@ -161,7 +275,7 @@ async function createLocalSkill(directoryPath, root, relativeSegments, token) {
   };
 }
 
-async function walkForSkills(directoryPath, root, relativeSegments, depth, token, output) {
+async function walkForSkills(directoryPath, root, relativeSegments, depth, token, output, state) {
   if (depth > MAX_SCAN_DEPTH) return;
   let entries;
   try {
@@ -170,28 +284,32 @@ async function walkForSkills(directoryPath, root, relativeSegments, depth, token
     if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EPERM') return;
     throw error;
   }
+  await markDirectoryVisited(directoryPath, state);
 
   if (entries.some((entry) => entry.isFile() && entry.name.toLocaleLowerCase('en-US') === 'skill.md')) {
-    const skill = await createLocalSkill(directoryPath, root, relativeSegments, token);
+    const skill = await createLocalSkill(directoryPath, root, relativeSegments, token, state);
     if (skill) output.push(skill);
   }
 
   entries.sort((a, b) => comparePath(a.name, b.name));
   for (const entry of entries) {
-    if (
-      entry.isDirectory() &&
-      !entry.isSymbolicLink() &&
-      !SKIP_DIRECTORIES.has(entry.name.toLocaleLowerCase('en-US'))
-    ) {
-      await walkForSkills(
-        path.join(directoryPath, entry.name),
-        root,
-        relativeSegments.concat(entry.name),
-        depth + 1,
-        token,
-        output
-      );
+    const lowerName = entry.name.toLocaleLowerCase('en-US');
+    if (SKIP_DIRECTORIES.has(lowerName)) continue;
+    if (entry.isSymbolicLink()) {
+      // 隔离场景正是"整个 Skill 目录都是链接"，这里必须跟进去。
+      if (await resolveEntryLink(path.join(directoryPath, entry.name), state) !== 'directory') continue;
+    } else if (!entry.isDirectory()) {
+      continue;
     }
+    await walkForSkills(
+      path.join(directoryPath, entry.name),
+      root,
+      relativeSegments.concat(entry.name),
+      depth + 1,
+      token,
+      output,
+      state
+    );
   }
 }
 
@@ -202,25 +320,49 @@ function resolveRoots(homeDirectory, roots = DEFAULT_ROOTS) {
   }));
 }
 
+function emptyLinkBuckets() {
+  const links = {};
+  for (const bucket of LINK_BUCKETS) links[bucket] = [];
+  return links;
+}
+
+function summarizeLinks(links) {
+  const summary = {};
+  for (const bucket of LINK_BUCKETS) summary[bucket] = (links[bucket] || []).length;
+  return summary;
+}
+
 async function scanRoots(options = {}) {
   const token = options.token || 'test-token';
+  const followLinks = options.followLinks !== false;
   const roots = resolveRoots(options.homeDirectory || os.homedir(), options.roots);
   const skills = [];
   const rootResults = [];
+  const links = emptyLinkBuckets();
+
+  // 允许跨越扫描根之间互相引用：一个根里的链接指向另一个扫描根属于正常用法。
+  const allowedRealRoots = [];
+  for (const root of roots) {
+    const resolved = await fs.realpath(root.absolutePath).catch(() => null);
+    if (resolved) allowedRealRoots.push(resolved);
+  }
 
   for (const root of roots) {
+    // 每个根各自一套 visited：两个不同的根链到同一目标时，算两个 Skill 实例（作用域不同）。
+    const state = createLinkState(allowedRealRoots, followLinks);
     try {
       const stat = await fs.stat(root.absolutePath);
       if (!stat.isDirectory()) throw Object.assign(new Error('不是目录'), { code: 'ENOTDIR' });
       const rootSkills = [];
-      await walkForSkills(root.absolutePath, root, [], 0, token, rootSkills);
+      await walkForSkills(root.absolutePath, root, [], 0, token, rootSkills, state);
       skills.push(...rootSkills);
       rootResults.push({
         id: root.id,
         label: root.label,
         path: root.displayPath,
         status: 'ready',
-        skillCount: rootSkills.length
+        skillCount: rootSkills.length,
+        followedLinks: state.links.followed.length
       });
     } catch (error) {
       const missing = error.code === 'ENOENT';
@@ -230,12 +372,14 @@ async function scanRoots(options = {}) {
         path: root.displayPath,
         status: missing ? 'missing' : 'error',
         skillCount: 0,
+        followedLinks: 0,
         error: missing ? '目录不存在' : '目录无法读取'
       });
     }
+    for (const bucket of LINK_BUCKETS) links[bucket].push(...state.links[bucket]);
   }
 
-  return { roots: rootResults, skills };
+  return { roots: rootResults, skills, links, followLinks };
 }
 
 function safeEqual(expected, actual) {
@@ -318,7 +462,9 @@ function createHelperServer(options = {}) {
         indexedSkills = new Map(result.skills.map((skill) => [skill.helperSkillId, skill]));
         writeJson(response, 200, {
           roots: result.roots,
-          skills: result.skills.map(({ directoryPath, files, ...skill }) => skill)
+          skills: result.skills.map(({ directoryPath, files, ...skill }) => skill),
+          // 只给计数，不给路径：本机目录布局没有必要离开这台机器。详细清单只有本地 CLI 才输出。
+          links: summarizeLinks(result.links)
         }, origin);
         return;
       }
@@ -423,7 +569,10 @@ module.exports = {
   HELPER_VERSION,
   computeVersionHash,
   createHelperServer,
+  createLinkState,
   parseFrontmatter,
+  resolveEntryLink,
   scanRoots,
-  shouldSkipFile
+  shouldSkipFile,
+  summarizeLinks
 };
