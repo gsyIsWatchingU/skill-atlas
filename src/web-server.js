@@ -1,6 +1,8 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
+const fsNative = require('node:fs');
 const path = require('node:path');
+const { pipeline } = require('node:stream/promises');
 const {
   createHash,
   randomBytes,
@@ -16,6 +18,8 @@ const SESSION_COOKIE = 'skill_atlas_session';
 const SSO_STATE_COOKIE = 'skill_atlas_sso_state';
 const WEB_ROOT = path.join(__dirname, 'web');
 const ASSET_ROOT = path.join(__dirname, '..', 'assets');
+const CLI_SCRIPT_PATH = path.join(__dirname, '..', 'bin', 'skill-dock.js');
+const DESKTOP_OUTPUT_DIR = path.join(__dirname, '..', 'outputs');
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -113,6 +117,7 @@ function validatePackage(input) {
   const skill = {
     name,
     description: String(input.skill?.description || '').trim().slice(0, 500),
+    zhSummary: String(input.skill?.zhSummary || input.zhSummary || '').trim().slice(0, 500),
     platform: String(input.skill?.platform || 'shared').trim().slice(0, 40),
     folderName: slugify(input.skill?.folderName || name),
     ownership: 'personal'
@@ -136,6 +141,88 @@ function validateVisibility(value) {
     throw httpError('可见性必须是私有或社区', 400);
   }
   return value;
+}
+
+// 中文简介：仅作为 Skill 的数据库侧元数据生成与存储，绝不写回源文件。
+// 离线确定性生成：优先复用已有的中文描述，否则从英文描述中抽取动词与名词组合成简介。
+const ZH_VERB_TERMS = [
+  ['create', '创建'], ['generate', '生成'], ['edit', '编辑'], ['read', '读取'], ['write', '写入'],
+  ['manage', '管理'], ['analyze', '分析'], ['search', '检索'], ['convert', '转换'], ['translate', '翻译'],
+  ['summarize', '总结'], ['extract', '提取'], ['review', '审阅'], ['draft', '起草'], ['plan', '规划'],
+  ['schedule', '安排'], ['send', '发送'], ['upload', '上传'], ['download', '下载'], ['install', '安装'],
+  ['scan', '扫描'], ['sync', '同步'], ['compare', '比较'], ['organize', '整理'], ['optimize', '优化'],
+  ['classify', '分类'], ['detect', '检测'], ['process', '处理'], ['design', '设计'], ['build', '构建'],
+  ['track', '跟踪'], ['monitor', '监控'], ['evaluate', '评估'], ['predict', '预测'], ['recommend', '推荐'],
+  ['answer', '回答'], ['improve', '改进'], ['fix', '修复'], ['debug', '调试'], ['test', '测试'],
+  ['format', '排版'], ['publish', '发布'], ['share', '分享'], ['import', '导入'], ['export', '导出'],
+  ['merge', '合并'], ['filter', '筛选'], ['sort', '排序'], ['count', '统计'], ['calculate', '计算'],
+  ['verify', '核验'], ['validate', '校验'], ['audit', '审计'], ['approve', '审批'], ['remind', '提醒'],
+  ['notify', '通知'], ['collect', '收集'], ['explain', '解释'], ['query', '查询'], ['update', '更新'],
+  ['delete', '删除'], ['remove', '移除'], ['package', '打包'], ['run', '运行'], ['check', '检查'],
+  ['inspect', '检查'], ['list', '列出'], ['find', '查找'], ['select', '选择'], ['open', '打开'],
+  ['save', '保存'], ['load', '加载'], ['apply', '应用'], ['use', '使用']
+];
+
+const ZH_NOUN_TERMS = [
+  ['spreadsheet', '表格'], ['excel', 'Excel 表格'], ['sheet', '表格'], ['document', '文档'],
+  ['docx', 'Word 文档'], ['presentation', '演示文稿'], ['slide', '幻灯片'], ['ppt', 'PPT'],
+  ['image', '图片'], ['picture', '图片'], ['photo', '照片'], ['screenshot', '截图'],
+  ['video', '视频'], ['audio', '音频'], ['voice', '语音'], ['music', '音乐'],
+  ['file', '文件'], ['folder', '目录'], ['directory', '目录'], ['data', '数据'],
+  ['report', '报告'], ['contract', '合同'], ['agreement', '协议'], ['meeting', '会议'],
+  ['minutes', '会议纪要'], ['email', '邮件'], ['mail', '邮件'], ['message', '消息'],
+  ['task', '任务'], ['todo', '待办'], ['calendar', '日历'], ['code', '代码'],
+  ['script', '脚本'], ['api', '接口'], ['database', '数据库'], ['website', '网站'],
+  ['webpage', '网页'], ['page', '页面'], ['application', '应用'], ['skill', '技能'],
+  ['template', '模板'], ['project', '项目'], ['customer', '客户'], ['order', '订单'],
+  ['product', '产品'], ['inventory', '库存'], ['marketing', '营销'], ['content', '内容'],
+  ['article', '文章'], ['news', '新闻'], ['finance', '财务'], ['stock', '股票'],
+  ['chart', '图表'], ['graph', '图表'], ['diagram', '示意图'], ['workflow', '工作流'],
+  ['agent', '智能体'], ['summary', '摘要'], ['title', '标题'], ['keyword', '关键词'],
+  ['language', '语言'], ['manual', '手册'], ['guide', '指南'], ['tutorial', '教程'],
+  ['checklist', '清单'], ['invoice', '发票'], ['receipt', '收据'], ['payment', '支付'],
+  ['refund', '退款'], ['shipping', '物流'], ['logistics', '物流'], ['warehouse', '仓储'],
+  ['quality', '质量'], ['issue', '问题'], ['error', '错误'], ['log', '日志'],
+  ['config', '配置'], ['deploy', '部署'], ['commit', '提交'], ['branch', '分支'],
+  ['github', 'GitHub'], ['readme', '说明文档'], ['cron', '定时任务'], ['questionnaire', '问卷'],
+  ['survey', '调研'], ['interview', '访谈'], ['proposal', '方案'], ['budget', '预算'],
+  ['risk', '风险'], ['compliance', '合规'], ['legal', '法律'], ['patent', '专利'],
+  ['research', '研究'], ['paper', '论文'], ['literature', '文献'], ['medical', '医疗'],
+  ['health', '健康'], ['user', '用户'], ['chart', '图表']
+];
+
+function matchZhTerms(text, terms) {
+  const lower = String(text || '').toLocaleLowerCase('en-US');
+  const found = [];
+  const seen = new Set();
+  for (const [en, zh] of terms) {
+    if (seen.has(zh)) continue;
+    const escaped = en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = lower.match(new RegExp(`\\b${escaped}\\b`, 'i'));
+    if (match) {
+      seen.add(zh);
+      found.push({ zh, pos: match.index });
+    }
+  }
+  return found.sort((a, b) => a.pos - b.pos).map((item) => item.zh);
+}
+
+function generateZhSummary(skill) {
+  const displayName = String(skill?.name || skill?.folderName || '').trim() || '该技能';
+  const description = String(skill?.description || '').trim();
+  if (/[\u4e00-\u9fa5]/.test(description)) {
+    return description.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  const verbs = matchZhTerms(description, ZH_VERB_TERMS).slice(0, 6);
+  const nouns = matchZhTerms(description, ZH_NOUN_TERMS).slice(0, 8);
+  const verbText = verbs.join('、');
+  const nounText = nouns.join('、');
+  if (verbText && nounText) return `「${displayName}」技能：提供${verbText}等能力，适用于${nounText}等场景。`;
+  if (verbText) return `「${displayName}」技能：提供${verbText}等能力。`;
+  if (nounText) return `「${displayName}」技能：围绕${nounText}等提供处理能力。`;
+  return description
+    ? `「${displayName}」技能：${description.replace(/\s+/g, ' ').trim().slice(0, 80)}`
+    : `「${displayName}」技能：暂无简介。`;
 }
 
 function tokensMatch(expected, actual) {
@@ -276,6 +363,7 @@ function createPgRepository(databaseUrl) {
     ');',
     'ALTER TABLE skills ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES skill_users(id) ON DELETE CASCADE;',
     'ALTER TABLE skills ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT \'private\';',
+    'ALTER TABLE skills ADD COLUMN IF NOT EXISTS zh_summary TEXT NOT NULL DEFAULT \'\';',
     'ALTER TABLE skills DROP CONSTRAINT IF EXISTS skills_normalized_name_key;',
     'CREATE TABLE IF NOT EXISTS skill_versions (',
     '  skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,',
@@ -319,6 +407,7 @@ function createPgRepository(databaseUrl) {
       id: row.id,
       name: row.name,
       description: row.description,
+      zhSummary: row.zh_summary || '',
       platform: row.platform,
       folderName: row.folder_name,
       ownership: row.ownership,
@@ -466,8 +555,8 @@ function createPgRepository(databaseUrl) {
       await client.query([
         'INSERT INTO skills (',
         '  id, normalized_name, name, description, platform, folder_name, ownership,',
-        '  owner_id, visibility, latest_version_hash, updated_at',
-        ') VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+        '  owner_id, visibility, latest_version_hash, updated_at, zh_summary',
+        ') VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
         'ON CONFLICT (id) DO UPDATE SET',
         '  name = EXCLUDED.name,',
         '  description = EXCLUDED.description,',
@@ -476,7 +565,8 @@ function createPgRepository(databaseUrl) {
         '  ownership = EXCLUDED.ownership,',
         '  visibility = EXCLUDED.visibility,',
         '  latest_version_hash = EXCLUDED.latest_version_hash,',
-        '  updated_at = EXCLUDED.updated_at'
+        '  updated_at = EXCLUDED.updated_at,',
+        '  zh_summary = CASE WHEN EXCLUDED.zh_summary = \'\' THEN skills.zh_summary ELSE EXCLUDED.zh_summary END'
       ].join('\n'), [
         id,
         normalizedName,
@@ -488,7 +578,8 @@ function createPgRepository(databaseUrl) {
         user.id,
         visibility,
         metadata.versionHash,
-        metadata.updatedAt
+        metadata.updatedAt,
+        metadata.zhSummary || ''
       ]);
       await client.query([
         'INSERT INTO skill_versions',
@@ -553,6 +644,7 @@ function createPgRepository(databaseUrl) {
       skill: {
         name: metadata.name,
         description: metadata.description,
+        zhSummary: metadata.zhSummary,
         platform: metadata.platform,
         folderName: metadata.folderName,
         ownership: metadata.ownership,
@@ -605,18 +697,102 @@ function createPgRepository(databaseUrl) {
   };
 }
 
+// 命令行脚本以单文件形式对外发布，版本号从脚本自身读取，避免两处维护。
+async function describeCliScript() {
+  let content;
+  try {
+    content = await fs.readFile(CLI_SCRIPT_PATH);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { available: false };
+    throw error;
+  }
+  const match = content.toString('utf8').match(/const CLI_VERSION = '([^']+)'/);
+  return {
+    available: true,
+    name: 'skill-dock',
+    version: match ? match[1] : 'unknown',
+    sizeBytes: content.length,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    downloadPath: '/cli/skill-dock.js'
+  };
+}
+
+/**
+ * 桌面安装包描述。
+ *
+ * 桌面版是 C 通道（本地可信宿主）的只读形态，也是首页默认引导的安装方式：
+ * 装一次之后点一下就能扫本机 Skill，不用下载脚本、不用开命令行。
+ * 安装包由 `npm run dist` 产出到 outputs/，这里只挑最新一个 nsis 安装器。
+ */
+async function findDesktopInstaller(outputDir = DESKTOP_OUTPUT_DIR) {
+  let entries;
+  try {
+    entries = await fs.readdir(outputDir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { available: false };
+    throw error;
+  }
+  const candidates = [];
+  for (const name of entries) {
+    if (!/\.exe$/i.test(name)) continue;
+    if (!/setup/i.test(name)) continue; // 只发安装包，不发 portable 单文件
+    const filePath = path.join(outputDir, name);
+    try {
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile()) continue;
+      candidates.push({ name, filePath, sizeBytes: stat.size, mtimeMs: stat.mtimeMs });
+    } catch { /* 单个文件读不到不影响其它候选 */ }
+  }
+  if (!candidates.length) return { available: false };
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const latest = candidates[0];
+  return {
+    available: true,
+    name: 'Skill Dock',
+    fileName: latest.name,
+    filePath: latest.filePath,
+    sizeBytes: latest.sizeBytes,
+    // 安装包近 90 MB，不在这里整份读进来算哈希 —— 流式算，避免每次请求打爆内存
+    sha256: await hashFile(latest.filePath),
+    downloadPath: '/download/desktop'
+  };
+}
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fsNative.createReadStream(filePath);
+    stream.on('error', reject);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
 async function serveStatic(response, pathname) {
   const isBrandIcon = pathname === '/icon.svg';
   const root = isBrandIcon ? ASSET_ROOT : WEB_ROOT;
   const relative = pathname === '/' ? 'index.html' : isBrandIcon ? 'icon.svg' : decodeURIComponent(pathname).replace(/^\/+/, '');
   const resolvedRoot = path.resolve(root);
-  const resolved = path.resolve(root, relative);
+  let resolved = path.resolve(root, relative);
   if (!resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
     json(response, 404, { error: '页面不存在' });
     return;
   }
   try {
-    const content = await fs.readFile(resolved);
+    let content;
+    try {
+      content = await fs.readFile(resolved);
+    } catch (error) {
+      // /scan 与 /scan/ 都回退到该目录下的 index.html。
+      const isDirectoryRequest = error.code === 'EISDIR' || (error.code === 'ENOENT' && !path.extname(relative));
+      if (!isDirectoryRequest) throw error;
+      resolved = path.resolve(root, relative, 'index.html');
+      if (!resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
+        json(response, 404, { error: '页面不存在' });
+        return;
+      }
+      content = await fs.readFile(resolved);
+    }
     response.writeHead(200, {
       'Content-Type': CONTENT_TYPES[path.extname(resolved)] || 'application/octet-stream',
       'Cache-Control': path.extname(resolved) === '.html' ? 'no-cache' : 'public, max-age=300',
@@ -687,6 +863,8 @@ function createSkillAtlasServer(options = {}) {
   const publicUrl = options.publicUrl ?? process.env.PUBLIC_URL ?? '';
   const exchangeSsoCode = options.exchangeSsoCode || requestSsoUser;
   const callSsoApi = options.callSsoApi || requestSsoApi;
+  // 桌面安装包目录可注入，便于测试用临时目录，避免读真实的大安装包
+  const desktopOutputDir = options.desktopOutputDir || DESKTOP_OUTPUT_DIR;
   const ssoClientId = 'skill-dock';
   const repository = options.repository || createPgRepository(options.databaseUrl ?? process.env.DATABASE_URL);
   const consumeAuthAttempt = createRateLimiter();
@@ -905,6 +1083,10 @@ function createSkillAtlasServer(options = {}) {
           error.statusCode = error.statusCode || 400;
           throw error;
         }
+        // 中文简介只在数据库侧生成与存储，不写回 Skill 源文件；缺省时增量补齐。
+        if (!validated.metadata.zhSummary) {
+          validated.metadata.zhSummary = generateZhSummary(validated.metadata);
+        }
         const metadata = await repository.save(user, validated, validateVisibility(input.visibility));
         json(response, 201, { skill: metadata });
         return;
@@ -937,6 +1119,61 @@ function createSkillAtlasServer(options = {}) {
           return;
         }
       }
+
+      if (url.pathname === '/api/cli/info' && request.method === 'GET') {
+        json(response, 200, { cli: await describeCliScript() });
+        return;
+      }
+
+      if (url.pathname === '/cli/skill-dock.js' && request.method === 'GET') {
+        let content;
+        try {
+          content = await fs.readFile(CLI_SCRIPT_PATH);
+        } catch (error) {
+          if (error.code === 'ENOENT') throw httpError('命令行脚本未随本次发布提供', 404);
+          throw error;
+        }
+        response.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': 'inline; filename="skill-dock.js"',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer'
+        });
+        response.end(content);
+        return;
+      }
+
+      if (url.pathname === '/api/desktop/info' && request.method === 'GET') {
+        const info = await findDesktopInstaller(desktopOutputDir);
+        // 公开接口不能泄露服务器本地绝对路径
+        json(response, 200, {
+          desktop: {
+            available: Boolean(info.available),
+            name: info.name || '',
+            fileName: info.fileName || '',
+            sizeBytes: info.sizeBytes || 0,
+            sha256: info.sha256 || '',
+            downloadPath: info.downloadPath || ''
+          }
+        });
+        return;
+      }
+
+      if (url.pathname === '/download/desktop' && request.method === 'GET') {
+        const info = await findDesktopInstaller(desktopOutputDir);
+        if (!info.available) throw httpError('桌面安装包未随本次发布提供', 404);
+        response.writeHead(200, {
+          'Content-Type': 'application/vnd.microsoft.portable-executable',
+          'Content-Length': info.sizeBytes,
+          'Content-Disposition': `attachment; filename="${info.fileName}"`,
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer'
+        });
+        // 流式回包：安装包 ~90 MB，不能整份读进内存
+        await pipeline(fsNative.createReadStream(info.filePath), response);
+        return;      }
 
       if (url.pathname.startsWith('/api/')) {
         json(response, 404, { error: '接口不存在' });

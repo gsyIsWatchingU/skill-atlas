@@ -1,19 +1,65 @@
 {
   "name": "skill-atlas",
-  "version": "2.1.0",
-  "description": "扫描、存储、比较并跨设备安装 Agent Skills 的在线应用",
+  "version": "2.2.0",
+  "description": "面向项目的 Agent 工作流环境管理器：本地只读扫描、项目级隔离与工作流包分享",
   "private": true,
   "license": "MIT",
+  "main": "src/main.js",
+  "bin": {
+    "skill-dock": "bin/skill-dock.js"
+  },
   "scripts": {
     "start": "node src/web-server.js",
     "dev": "node --watch src/web-server.js",
     "helper": "node src/web/helper/skill-dock-helper.js",
-    "test": "node --test test/helper.test.js test/web-server.test.js"
+    "scan": "node bin/skill-dock.js scan",
+    "desktop": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "cn.gsy.skilldock",
+    "productName": "Skill Dock",
+    "copyright": "MIT Licensed",
+    "files": [
+      "src/main.js",
+      "src/preload.js",
+      "src/settings.js",
+      "src/usage-scanner.js",
+      "src/scanner/**/*",
+      "src/renderer/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "outputs"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Skill-Dock-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Skill Dock"
+    },
+    "publish": null
   }
 }

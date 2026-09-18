@@ -21,6 +21,8 @@ const state = {
   communitySkills: [],
   user: null,
   busy: false,
+  searchQuery: '',
+  zhSummaries: {},
   authMode: 'login',
   helper: {
     token: '',
@@ -46,6 +48,7 @@ const elements = {
   cancelAuth: document.querySelector('#cancel-auth'),
   cancelLegacy: document.querySelector('#cancel-legacy'),
   claimLegacy: document.querySelector('#claim-legacy'),
+  clearSearch: document.querySelector('#clear-search'),
   cloudCount: document.querySelector('#cloud-count'),
   cloudEmpty: document.querySelector('#cloud-empty'),
   cloudEmptyCopy: document.querySelector('#cloud-empty-copy'),
@@ -63,11 +66,11 @@ const elements = {
   connectionText: document.querySelector('#connection-text'),
   differentCount: document.querySelector('#different-count'),
   detectHelper: document.querySelector('#detect-helper'),
+  desktopStatus: document.querySelector('#desktop-status'),
+  desktopStatusLabel: document.querySelector('#desktop-status-label'),
+  desktopStatusVersion: document.querySelector('#desktop-status-version'),
+  downloadDesktop: document.querySelector('#download-desktop'),
   directoryInput: document.querySelector('#directory-input'),
-  helperCopy: document.querySelector('#helper-copy'),
-  helperStatus: document.querySelector('#helper-status'),
-  helperStatusLabel: document.querySelector('#helper-status-label'),
-  helperStatusVersion: document.querySelector('#helper-status-version'),
   legacyDialog: document.querySelector('#legacy-dialog'),
   legacyForm: document.querySelector('#legacy-form'),
   legacyToken: document.querySelector('#legacy-token'),
@@ -81,7 +84,9 @@ const elements = {
   scanDirectories: document.querySelector('#scan-directories'),
   scanDirectorySummary: document.querySelector('#scan-directory-summary'),
   scanLabel: document.querySelector('#scan-label'),
+  searchCount: document.querySelector('#search-count'),
   sendAuthCode: document.querySelector('#send-auth-code'),
+  skillSearch: document.querySelector('#skill-search'),
   submitAuth: document.querySelector('#submit-auth'),
   toast: document.querySelector('#toast'),
   userMenu: document.querySelector('#user-menu'),
@@ -90,6 +95,209 @@ const elements = {
 
 function normalizeName(value) {
   return String(value || '').normalize('NFKC').toLocaleLowerCase('en-US').trim();
+}
+
+function normalizeSearchText(value) {
+  return normalizeName(value);
+}
+
+function skillMatchesSearch(skill, query) {
+  if (!query) return true;
+  return [skill.name, skill.description, skill.folderName, skill.source]
+    .filter(Boolean)
+    .map(normalizeName)
+    .join(' ')
+    .includes(query);
+}
+
+// 中文简介：仅作为 Skill 元数据生成与缓存，绝不写回源文件。
+// 离线确定性生成：优先复用已有的中文描述，否则从英文描述中抽取动词与名词组合成简介。
+const ZH_VERB_TERMS = [
+  ['create', '创建'], ['generate', '生成'], ['edit', '编辑'], ['read', '读取'], ['write', '写入'],
+  ['manage', '管理'], ['analyze', '分析'], ['search', '检索'], ['convert', '转换'], ['translate', '翻译'],
+  ['summarize', '总结'], ['extract', '提取'], ['review', '审阅'], ['draft', '起草'], ['plan', '规划'],
+  ['schedule', '安排'], ['send', '发送'], ['upload', '上传'], ['download', '下载'], ['install', '安装'],
+  ['scan', '扫描'], ['sync', '同步'], ['compare', '比较'], ['organize', '整理'], ['optimize', '优化'],
+  ['classify', '分类'], ['detect', '检测'], ['process', '处理'], ['design', '设计'], ['build', '构建'],
+  ['track', '跟踪'], ['monitor', '监控'], ['evaluate', '评估'], ['predict', '预测'], ['recommend', '推荐'],
+  ['answer', '回答'], ['improve', '改进'], ['fix', '修复'], ['debug', '调试'], ['test', '测试'],
+  ['format', '排版'], ['publish', '发布'], ['share', '分享'], ['import', '导入'], ['export', '导出'],
+  ['merge', '合并'], ['filter', '筛选'], ['sort', '排序'], ['count', '统计'], ['calculate', '计算'],
+  ['verify', '核验'], ['validate', '校验'], ['audit', '审计'], ['approve', '审批'], ['remind', '提醒'],
+  ['notify', '通知'], ['collect', '收集'], ['explain', '解释'], ['query', '查询'], ['update', '更新'],
+  ['delete', '删除'], ['remove', '移除'], ['package', '打包'], ['run', '运行'], ['check', '检查'],
+  ['inspect', '检查'], ['list', '列出'], ['find', '查找'], ['select', '选择'], ['open', '打开'],
+  ['save', '保存'], ['load', '加载'], ['apply', '应用'], ['use', '使用']
+];
+
+const ZH_NOUN_TERMS = [
+  ['spreadsheet', '表格'], ['excel', 'Excel 表格'], ['sheet', '表格'], ['document', '文档'],
+  ['docx', 'Word 文档'], ['presentation', '演示文稿'], ['slide', '幻灯片'], ['ppt', 'PPT'],
+  ['image', '图片'], ['picture', '图片'], ['photo', '照片'], ['screenshot', '截图'],
+  ['video', '视频'], ['audio', '音频'], ['voice', '语音'], ['music', '音乐'],
+  ['file', '文件'], ['folder', '目录'], ['directory', '目录'], ['data', '数据'],
+  ['report', '报告'], ['contract', '合同'], ['agreement', '协议'], ['meeting', '会议'],
+  ['minutes', '会议纪要'], ['email', '邮件'], ['mail', '邮件'], ['message', '消息'],
+  ['task', '任务'], ['todo', '待办'], ['calendar', '日历'], ['code', '代码'],
+  ['script', '脚本'], ['api', '接口'], ['database', '数据库'], ['website', '网站'],
+  ['webpage', '网页'], ['page', '页面'], ['application', '应用'], ['skill', '技能'],
+  ['template', '模板'], ['project', '项目'], ['customer', '客户'], ['order', '订单'],
+  ['product', '产品'], ['inventory', '库存'], ['marketing', '营销'], ['content', '内容'],
+  ['article', '文章'], ['news', '新闻'], ['finance', '财务'], ['stock', '股票'],
+  ['chart', '图表'], ['graph', '图表'], ['diagram', '示意图'], ['workflow', '工作流'],
+  ['agent', '智能体'], ['summary', '摘要'], ['title', '标题'], ['keyword', '关键词'],
+  ['language', '语言'], ['manual', '手册'], ['guide', '指南'], ['tutorial', '教程'],
+  ['checklist', '清单'], ['invoice', '发票'], ['receipt', '收据'], ['payment', '支付'],
+  ['refund', '退款'], ['shipping', '物流'], ['logistics', '物流'], ['warehouse', '仓储'],
+  ['quality', '质量'], ['issue', '问题'], ['error', '错误'], ['log', '日志'],
+  ['config', '配置'], ['deploy', '部署'], ['commit', '提交'], ['branch', '分支'],
+  ['github', 'GitHub'], ['readme', '说明文档'], ['cron', '定时任务'], ['questionnaire', '问卷'],
+  ['survey', '调研'], ['interview', '访谈'], ['proposal', '方案'], ['budget', '预算'],
+  ['risk', '风险'], ['compliance', '合规'], ['legal', '法律'], ['patent', '专利'],
+  ['research', '研究'], ['paper', '论文'], ['literature', '文献'], ['medical', '医疗'],
+  ['health', '健康'], ['user', '用户']
+];
+
+function matchZhTerms(text, terms) {
+  const lower = String(text || '').toLocaleLowerCase('en-US');
+  const found = [];
+  const seen = new Set();
+  for (const entry of terms) {
+    const en = entry[0];
+    const zh = entry[1];
+    if (seen.has(zh)) continue;
+    const escaped = en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = lower.match(new RegExp('\\b' + escaped + '\\b', 'i'));
+    if (match) {
+      seen.add(zh);
+      found.push({ zh: zh, pos: match.index });
+    }
+  }
+  return found.sort(function (a, b) { return a.pos - b.pos; }).map(function (item) { return item.zh; });
+}
+
+function generateZhSummary(skill) {
+  const displayName = String(skill.name || skill.folderName || '').trim() || '该技能';
+  const description = String(skill.description || '').trim();
+  if (/[\u4e00-\u9fa5]/.test(description)) {
+    return description.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  const verbs = matchZhTerms(description, ZH_VERB_TERMS).slice(0, 6);
+  const nouns = matchZhTerms(description, ZH_NOUN_TERMS).slice(0, 8);
+  const verbText = verbs.join('、');
+  const nounText = nouns.join('、');
+  if (verbText && nounText) return '「' + displayName + '」技能：提供' + verbText + '等能力，适用于' + nounText + '等场景。';
+  if (verbText) return '「' + displayName + '」技能：提供' + verbText + '等能力。';
+  if (nounText) return '「' + displayName + '」技能：围绕' + nounText + '等提供处理能力。';
+  return description
+    ? '「' + displayName + '」技能：' + description.replace(/\s+/g, ' ').trim().slice(0, 80)
+    : '「' + displayName + '」技能：暂无简介。';
+}
+
+const ZH_SUMMARY_STORAGE = 'skill-dock-zh-summaries';
+
+function loadZhSummaries() {
+  try {
+    const raw = window.localStorage.getItem(ZH_SUMMARY_STORAGE);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistZhSummaries() {
+  try {
+    window.localStorage.setItem(ZH_SUMMARY_STORAGE, JSON.stringify(state.zhSummaries));
+  } catch {}
+}
+
+function getSkillZhSummary(skill) {
+  if (skill.zhSummary) return skill.zhSummary;
+  const key = normalizeName(skill.name);
+  return state.zhSummaries[key] || generateZhSummary(skill);
+}
+
+// 增量补齐：只给没有中文简介的 Skill 生成，已生成的保持不变。
+function ensureZhSummaries(skills) {
+  let changed = false;
+  for (const skill of skills || []) {
+    if (!skill) continue;
+    const key = normalizeName(skill.name);
+    if (skill.zhSummary || state.zhSummaries[key]) continue;
+    state.zhSummaries[key] = generateZhSummary(skill);
+    changed = true;
+  }
+  if (changed) persistZhSummaries();
+}
+
+function truncateZh(value, max) {
+  const text = String(value || '').trim();
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
+function findDuplicateGroups(skills) {
+  const api = window.SkillDedup;
+  if (api) return api.findDuplicateGroups(skills || state.localSkills);
+  const list = skills || state.localSkills;
+  const groups = new Map();
+  for (const skill of list) {
+    const key = normalizeName(skill.name);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(skill);
+  }
+  const result = [];
+  for (const entry of groups) {
+    const key = entry[0];
+    const list2 = entry[1];
+    if (list2.length > 1) result.push({ key: key, name: list2[0].name, skills: list2 });
+  }
+  return result;
+}
+
+// 扫描后检测同名 Skill：提醒用户每组只保留文件最全的一个，仅移出本机清单，不删除磁盘源文件。
+async function promptDuplicateDedup() {
+  const groups = findDuplicateGroups();
+  if (!groups.length) return;
+  const summary = groups.slice(0, 5).map(function (group) {
+    return group.name + '（' + group.skills.length + ' 个版本）';
+  }).join('、');
+  const more = groups.length > 5 ? ' 等 ' + groups.length + ' 组' : '';
+  const confirmed = await confirmAction(
+    '发现重复 Skill',
+    '同名 Skill 共 ' + groups.length + ' 组：' + summary + more +
+    '。每组只保留文件最全的一个，其余移出本机清单（不会删除磁盘上的源文件）。是否继续？'
+  );
+  if (!confirmed) return;
+  const api = window.SkillDedup;
+  const result = api
+    ? api.dedupeDuplicateSkills(state.localSkills)
+    : dedupeDuplicateSkillsFallback(state.localSkills);
+  state.localSkills = result.keptSkills;
+  render();
+  showToast('已去重：保留 ' + result.keptSkills.length + ' 个，移出 ' + result.removedCount + ' 个重复项');
+}
+
+// 兼容降级：SkillDedup 模块未加载时使用内置逻辑。
+function dedupeDuplicateSkillsFallback(skills) {
+  const groups = findDuplicateGroups(skills);
+  const keep = new Set();
+  let removedCount = 0;
+  for (const group of groups) {
+    group.skills.sort(function (a, b) {
+      return (b.fileCount - a.fileCount) || (b.sizeBytes - a.sizeBytes);
+    });
+    keep.add(group.skills[0]);
+    removedCount += group.skills.length - 1;
+  }
+  return {
+    keptSkills: (skills || []).filter(function (skill) {
+      return keep.has(skill) || !groups.some(function (group) {
+        return group.skills.includes(skill);
+      });
+    }),
+    removedCount: removedCount
+  };
 }
 
 function formatBytes(value) {
@@ -208,22 +416,37 @@ function storedHelperToken() {
   }
 }
 
+/**
+ * 本地助手（B 通道 CLI）的状态渲染。
+ *
+ * 首页不再暴露"复制命令跑脚本"的引导，但助手本身仍然可用：
+ * 自动化与 CI 场景直接跑 `node bin/skill-dock.js`（或 npm run helper）即可，
+ * helper token 通过 URL hash 带过来，这里只负责显示连接态。
+ */
 function renderHelper() {
+  // 首启的桌面版不渲染这些节点，做空值保护
+  if (!elements.helperStatus) return;
   const status = state.helper.connected ? 'connected' : state.helper.token ? 'pending' : 'disconnected';
   elements.helperStatus.className = 'helper-connection-status ' + status;
-  elements.helperStatusLabel.textContent = state.helper.connected
-    ? '已连接'
-    : state.helper.token ? '等待连接' : '未连接';
-  elements.helperStatusVersion.textContent = state.helper.connected && state.helper.version
-    ? 'v' + state.helper.version
-    : '';
-  elements.helperCopy.textContent = state.helper.connected
-    ? '已启用只读直达扫描；默认目录无需浏览器授权。'
-    : state.helper.token
-      ? '请保持助手窗口开启，并允许 Chrome 访问本地网络。'
-      : '试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。';
-  elements.detectHelper.disabled = state.busy;
-  elements.detectHelper.textContent = '重新检测';
+  if (elements.helperStatusLabel) {
+    elements.helperStatusLabel.textContent = state.helper.connected
+      ? '已连接'
+      : state.helper.token ? '等待连接' : '未连接';
+  }
+  if (elements.helperStatusVersion) {
+    elements.helperStatusVersion.textContent = state.helper.connected && state.helper.version
+      ? 'v' + state.helper.version
+      : '';
+  }
+  if (elements.helperCopy) {
+    elements.helperCopy.textContent = state.helper.connected
+      ? '已启用只读直达扫描。'
+      : '本地助手（CLI）适用于自动化与 CI；桌面版无需命令行。';
+  }
+  if (elements.detectHelper) {
+    elements.detectHelper.disabled = state.busy;
+    elements.detectHelper.textContent = '重新检测';
+  }
 }
 
 async function helperRequest(pathname, timeoutMs) {
@@ -254,7 +477,7 @@ async function detectHelper(silent) {
     state.helper.connected = false;
     renderHelper();
     renderScanDirectories();
-    if (!silent) showToast('请先下载并启动本地助手', true);
+    if (!silent) showToast('本地助手未配对；桌面版不需要这一步', true);
     return false;
   }
   try {
@@ -268,7 +491,7 @@ async function detectHelper(silent) {
   renderHelper();
   renderScanDirectories();
   if (!silent) showToast(
-    state.helper.connected ? '本地助手已连接' : '请保持助手运行，并允许浏览器访问本地网络',
+    state.helper.connected ? '本地助手已连接' : '本地助手未连接；桌面版可持续管理，网页端需手动授权文件夹',
     !state.helper.connected
   );
   return state.helper.connected;
@@ -290,7 +513,7 @@ function applyHelperScan(result) {
 async function scanWithHelper(automatic) {
   if (state.busy) return false;
   if (!state.helper.connected && !await detectHelper(true)) {
-    if (!automatic) showToast('请先启动本地助手；也可使用浏览器授权备用模式', true);
+    if (!automatic) showToast('本地助手未连接；也可用浏览器授权模式直接选择文件夹', true);
     return false;
   }
   setBusy(true, '本地助手正在扫描默认目录');
@@ -301,6 +524,10 @@ async function scanWithHelper(automatic) {
     const ready = (result.roots || []).filter(function (root) { return root.status === 'ready'; }).length;
     elements.scanLabel.textContent = '助手已扫描 ' + ready + ' 个目录 · 找到 ' + (result.skills || []).length + ' 个 Skill';
     if (!automatic) showToast('本地助手扫描完成');
+    ensureZhSummaries(result.skills || []);
+    render();
+    renderScanDirectories();
+    await promptDuplicateDedup();
     return true;
   } catch (error) {
     state.helper.connected = false;
@@ -630,6 +857,9 @@ function createSkillCard(skill, source, index) {
   const description = document.createElement('p');
   description.className = 'skill-description';
   description.textContent = skill.description || '暂无描述';
+  const zhSummary = document.createElement('p');
+  zhSummary.className = 'skill-zh-summary';
+  zhSummary.textContent = '中文简介：' + truncateZh(getSkillZhSummary(skill), 60);
   const details = document.createElement('p');
   details.className = 'skill-details';
   details.textContent = skill.fileCount + ' FILES · ' + formatBytes(skill.sizeBytes || 0);
@@ -639,8 +869,9 @@ function createSkillCard(skill, source, index) {
   if (source === 'local') {
     const cloud = findCloudSkill(skill);
     const sameVersion = cloud && cloud.versionHash === skill.versionHash;
-    const canUpload = skill.ownership !== 'system' && (
-      Boolean(skill.helperSkillId) || (Array.isArray(skill.files) && skill.files.length > 0)
+    // 所有本机 Skill 均可上传，不再按「系统自带」拦截。
+    const canUpload = Boolean(skill.helperSkillId) || (
+      Array.isArray(skill.files) && skill.files.length > 0
     );
     if (!state.user && canUpload) {
       actions.append(createButton('登录后上传', 'login', index, 'primary', false, source));
@@ -691,7 +922,7 @@ function createSkillCard(skill, source, index) {
     }
   }
 
-  card.append(meta, title, description, details, actions);
+  card.append(meta, title, description, zhSummary, details, actions);
   return card;
 }
 
@@ -788,19 +1019,70 @@ function renderScanDirectories() {
   }
 }
 
+function renderSectionEmpty(emptyElement, totalCount, visibleCount, searching, getDefault) {
+  const strong = emptyElement.querySelector('strong');
+  const span = emptyElement.querySelector('span');
+  const defaults = getDefault();
+  if (searching && totalCount > 0 && visibleCount === 0) {
+    strong.textContent = '没有匹配的 Skill';
+    span.textContent = '没有找到与「' + state.searchQuery + '」匹配的 Skill，换个关键词试试。';
+    emptyElement.classList.remove('hidden');
+    return;
+  }
+  emptyElement.classList.toggle('hidden', totalCount > 0);
+  strong.textContent = defaults.title;
+  span.textContent = defaults.copy;
+}
+
+function renderSearchSummary(searching, visible) {
+  if (!searching) {
+    elements.searchCount.textContent = '';
+    elements.clearSearch.hidden = true;
+    return;
+  }
+  elements.clearSearch.hidden = false;
+  const total = visible.local + visible.cloud + visible.community;
+  const grand = state.localSkills.length + state.cloudSkills.length + state.communitySkills.length;
+  elements.searchCount.textContent = '匹配 ' + total + ' / ' + grand + ' 个（本机 ' +
+    visible.local + ' · 云端 ' + visible.cloud + ' · 社区 ' + visible.community + '）';
+}
+
 function render() {
   elements.localSkills.replaceChildren();
   elements.cloudSkills.replaceChildren();
   elements.communitySkills.replaceChildren();
+  const query = normalizeSearchText(state.searchQuery);
+  const searching = Boolean(query);
+  const visible = { local: 0, cloud: 0, community: 0 };
+
   state.localSkills.forEach(function (skill, index) {
+    if (searching && !skillMatchesSearch(skill, query)) return;
+    visible.local += 1;
     elements.localSkills.append(createSkillCard(skill, 'local', index));
   });
   state.cloudSkills.forEach(function (skill, index) {
+    if (searching && !skillMatchesSearch(skill, query)) return;
+    visible.cloud += 1;
     elements.cloudSkills.append(createSkillCard(skill, 'cloud', index));
   });
   state.communitySkills.forEach(function (skill, index) {
+    if (searching && !skillMatchesSearch(skill, query)) return;
+    visible.community += 1;
     elements.communitySkills.append(createSkillCard(skill, 'community', index));
   });
+
+  renderSectionEmpty(elements.localEmpty, state.localSkills.length, visible.local, searching, function () {
+    return { title: '还没有本机清单', copy: '在上方授权至少一个默认目录后，Skill 会自动出现在这里。' };
+  });
+  renderSectionEmpty(elements.cloudEmpty, state.cloudSkills.length, visible.cloud, searching, function () {
+    return state.user
+      ? { title: '我的云端仓库为空', copy: '扫描本机目录后，可选择私有同步或发布到社区。' }
+      : { title: '登录后使用私有同步', copy: '你的私有 Skill 与其他账号完全隔离。' };
+  });
+  renderSectionEmpty(elements.communityEmpty, state.communitySkills.length, visible.community, searching, function () {
+    return { title: '社区暂时为空', copy: '登录后可将自己的 Skill 发布到社区。' };
+  });
+  renderSearchSummary(searching, visible);
 
   const different = state.cloudSkills.filter(function (skill) {
     const local = findLocalSkill(skill);
@@ -810,9 +1092,6 @@ function render() {
   elements.cloudCount.textContent = String(state.cloudSkills.length);
   elements.communityCount.textContent = String(state.communitySkills.length);
   elements.differentCount.textContent = String(different);
-  elements.localEmpty.classList.toggle('hidden', state.localSkills.length > 0);
-  elements.cloudEmpty.classList.toggle('hidden', state.cloudSkills.length > 0);
-  elements.communityEmpty.classList.toggle('hidden', state.communitySkills.length > 0);
 }
 
 function renderAccount() {
@@ -831,11 +1110,13 @@ async function refreshCloud() {
     elements.cloudLabel.textContent = state.user ? '正在读取' : '登录后同步';
     const communityResult = await apiRequest('/api/skills?scope=community');
     state.communitySkills = communityResult.skills || [];
+    ensureZhSummaries(state.communitySkills);
     state.cloudSkills = [];
     if (state.user) {
       try {
         const mineResult = await apiRequest('/api/skills?scope=mine');
         state.cloudSkills = mineResult.skills || [];
+        ensureZhSummaries(state.cloudSkills);
       } catch (error) {
         if (error.status !== 401) throw error;
         state.user = null;
@@ -876,6 +1157,7 @@ async function packageLocalSkill(skill) {
     skill: {
       name: skill.name,
       description: skill.description,
+      zhSummary: getSkillZhSummary(skill),
       platform: skill.platform,
       folderName: skill.folderName
     },
@@ -889,7 +1171,7 @@ async function uploadSkill(index, visibility, button) {
     openAuthDialog();
     return;
   }
-  if (!skill || skill.ownership === 'system') return;
+  if (!skill) return;
   button.disabled = true;
   button.textContent = '正在上传';
   try {
@@ -1116,6 +1398,7 @@ async function scanConfiguredDirectory(directory) {
       for (const skill of skills) skill.ownership = 'system';
     }
     replaceLocalSkillsForDirectory(directory.id, skills);
+    ensureZhSummaries(skills);
     directory.skillCount = skills.length;
     directory.status = 'ready';
     render();
@@ -1149,6 +1432,7 @@ async function scanAllConfiguredDirectories(automatic) {
     if (!automatic) {
       showToast(scanned ? '默认目录扫描完成' : '请先授权至少一个默认目录', !scanned);
     }
+    if (scanned) await promptDuplicateDedup();
   } finally {
     setBusy(false);
     renderScanDirectories();
@@ -1187,6 +1471,7 @@ async function authorizeScanDirectory(index) {
     await scanConfiguredDirectory(directory);
     elements.scanLabel.textContent = directory.label + ' · 找到 ' + directory.skillCount + ' 个 Skill';
     showToast(directory.label + ' 已设为默认扫描目录');
+    await promptDuplicateDedup();
   } catch (error) {
     if (error.name !== 'AbortError') showToast(error.message, true);
   } finally {
@@ -1246,6 +1531,7 @@ async function addScanDirectory() {
     await scanConfiguredDirectory(directory);
     elements.scanLabel.textContent = directory.label + ' · 找到 ' + directory.skillCount + ' 个 Skill';
     showToast('已新增默认扫描目录');
+    await promptDuplicateDedup();
   } catch (error) {
     if (error.name !== 'AbortError') showToast(error.message, true);
   } finally {
@@ -1295,9 +1581,11 @@ async function handleInputScan(event) {
   try {
     const skills = await scanInputFiles(event.target.files);
     mergeLocalSkills(skills);
+    ensureZhSummaries(skills);
     elements.scanLabel.textContent = '兼容模式 · 找到 ' + skills.length + ' 个 Skill';
     render();
     showToast('扫描完成；当前浏览器仅支持下载，不能直接安装');
+    await promptDuplicateDedup();
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -1329,9 +1617,39 @@ async function checkHealth() {
 
 elements.scanDirectory.addEventListener('click', scanDefaultSources);
 elements.addScanDirectory.addEventListener('click', addScanDirectory);
-elements.detectHelper.addEventListener('click', async function () {
-  if (await detectHelper(false)) await scanWithHelper(false);
-});
+if (elements.detectHelper) {
+  elements.detectHelper.addEventListener('click', async function () {
+    if (await detectHelper(false)) await scanWithHelper(false);
+  });
+}
+
+/**
+ * 桌面版检测。
+ *
+ * 这里刻意不再给"复制一条 PowerShell 命令去下载脚本再运行"——那是上一版的
+ * 安装方式，绝大多数人过不去（见 docs/solution.md §11 缺陷 #5）。
+ * 现在默认路径是下载桌面应用（C 通道的只读形态）；本地助手（B 通道 CLI）
+ * 仍然可用，但只作为自动化/CI 的可选入口，不再出现在首页主引导里。
+ */
+async function detectDesktopApp() {
+  const status = elements.desktopStatus;
+  if (!status) return;
+  // 页面本身被桌面版内嵌加载时（file:// 或带 desktop=1），直接判定为已安装
+  const embedded = window.location.protocol === 'file:' ||
+    new URLSearchParams(window.location.search).has('desktop');
+  status.className = 'desktop-connection-status ' + (embedded ? 'connected' : 'disconnected');
+  if (elements.desktopStatusLabel) {
+    elements.desktopStatusLabel.textContent = embedded ? '已在使用桌面版' : '未检测到桌面版';
+  }
+  if (elements.desktopStatusVersion) {
+    elements.desktopStatusVersion.textContent = embedded ? '只读模式' : '';
+  }
+  if (elements.downloadDesktop) {
+    elements.downloadDesktop.textContent = embedded ? '查看版本说明' : '下载桌面版';
+  }
+}
+detectDesktopApp();
+
 elements.scanDirectories.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
@@ -1394,6 +1712,16 @@ elements.authForm.addEventListener('submit', async function (event) {
 });
 elements.directoryInput.addEventListener('change', handleInputScan);
 elements.refreshCloud.addEventListener('click', refreshCloud);
+elements.skillSearch.addEventListener('input', function () {
+  state.searchQuery = elements.skillSearch.value;
+  render();
+});
+elements.clearSearch.addEventListener('click', function () {
+  state.searchQuery = '';
+  elements.skillSearch.value = '';
+  render();
+  elements.skillSearch.focus();
+});
 elements.localSkills.addEventListener('click', function (event) {
   const button = event.target.closest('button[data-action]');
   if (!button) return;
@@ -1454,6 +1782,7 @@ elements.legacyForm.addEventListener('submit', async function (event) {
   }
 });
 
+state.zhSummaries = loadZhSummaries();
 render();
 renderAccount();
 renderHelper();

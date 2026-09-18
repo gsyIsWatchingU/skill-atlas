@@ -30,6 +30,7 @@ test('本地助手只读扫描默认目录并过滤敏感文件', async (t) => {
   const result = await scanRoots({
     homeDirectory,
     token: 'fixture-token',
+    includeFiles: true,
     roots: [{
       id: 'codex-user',
       label: 'Codex 个人 Skill',
@@ -155,7 +156,7 @@ test('跟随 Skill 目录链接，并把跳出扫描根的目标记录在案', a
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   if (!created) return;
 
-  const result = await scanRoots({ homeDirectory: root, token: 'link-token', roots: [AGENTS_ROOT] });
+  const result = await scanRoots({ homeDirectory: root, token: 'link-token', includeFiles: true, roots: [AGENTS_ROOT] });
 
   assert.equal(result.roots[0].skillCount, 1);
   assert.equal(result.skills.length, 1);
@@ -200,7 +201,7 @@ test('Skill 目录内的链接文件按逻辑路径计入版本哈希', async (t
   const created = await linkOrSkip(t, path.join(shared, 'notes.md'), path.join(skillRoot, 'notes.md'), 'file');
   if (!created) return;
 
-  const result = await scanRoots({ homeDirectory: root, token: 'inner-token', roots: [AGENTS_ROOT] });
+  const result = await scanRoots({ homeDirectory: root, token: 'inner-token', includeFiles: true, roots: [AGENTS_ROOT] });
 
   assert.equal(result.skills.length, 1);
   assert.deepEqual(result.skills[0].files.map((file) => file.path), ['SKILL.md', 'notes.md']);

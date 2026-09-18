@@ -1,30 +1,111 @@
 # Skill Dock
 
-纯在线 Agent Skill 仓库，用于扫描、存储、比较和跨设备安装 Skill。
+面向项目的 Agent 工作流环境管理器：为每个项目启用刚刚好的 Skills，并把整套 Agent 工作流一键打包分享。
 
-## 功能
+三层对象（Skill / 工作流包 / 项目环境）、三条能力通道、数据模型、落盘流程与路线图，
+见 [`docs/solution.md`](docs/solution.md)。市场位置与竞品判断见 [`docs/competitors.md`](docs/competitors.md)。
+本文件描述的是当前已实现的能力。
 
-- Windows 本地助手可直接扫描 **.codex/skills**、**.agents/skills** 和 Codex 插件缓存，无需选择文件夹。
-- 浏览器目录授权保留为自定义目录和无助手场景的备用方式。
-- Chrome / Edge 可把云端 Skill 直接写入用户授权的目录。
-- PostgreSQL 存储 Skill、版本和每个文件的二进制内容。
-- 通过 SHA-256 判断本机缺失、已同步和版本不同。
-- 默认禁止上传系统自带 Skill，并过滤环境变量、密钥和凭证文件。
-- 通过本站邮箱密码表单接入统一账号，注册需邮箱验证码，私有 Skill 按账号隔离。
-- Skill 可在私有与社区两种可见性之间切换；社区 Skill 支持公开浏览和下载。
+## 三种入口，按"要装多少东西"递增
 
-浏览器不能静默遍历电脑。默认目录可由只监听 `127.0.0.1` 的只读助手扫描；未启动助手时，仍需用户主动授权目录。公网环境必须使用 HTTPS。
+| 入口 | 形态 | 适合谁 | 需要装什么 |
+|---|---|---|---|
+| **桌面应用** | Electron（C 通道，只读形态） | 日常使用：装一次，之后点一下就能扫 | 安装包 |
+| **展示页 `/scan/`** | 网页 + File System Access | 先看看结果，不想装任何东西 | 不用装 |
+| **命令行 `bin/skill-dock.js`** | 单文件 Node 脚本（B 通道） | 自动化、CI、要链接清单 | 不用装（需 Node） |
+
+三种形态**共用同一份扫描内核** `src/scanner/index.js`（网页端因浏览器沙箱无法复用，语义由契约测试对齐）。
+
+## 桌面应用（推荐）
+
+不需要下载脚本、不需要开命令行、不需要每次重新选文件夹。
+
+~~~powershell
+npm install
+npm run desktop     # 开发模式启动
+npm run dist        # 产出 Windows 安装包到 outputs/
+~~~
+
+安装包命名 `Skill-Dock-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
+
+**当前版本只读。** 界面里明确写着这句话：不建链接、不改 `config.toml`、不删除任何文件，
+扫描结果只留在本机内存。写入与回滚（Diff 预览 + 一键回滚）在 M2 提供。
+
+六个默认扫描根：Codex 个人 Skill、跨 Agent 共享 Skill、Codex 插件缓存，
+以及 Trae 三平台（`.trae-cn` / `.trae` / `.traecli`）。缺失的根如实报 `missing`，不臆造。
+
+安全基线：`contextIsolation` + `sandbox` + 无 `nodeIntegration`，
+本机能力只经 preload 白名单 IPC 暴露；不启本地 HTTP 服务，不联网上传。
+
+### 公网展示页 `/scan/`
+
+公网访客不会为了看一眼结果去开终端，所以展示页按"零动作 → 零安装 → 要动作"分三层：
+
+1. **先看结果**：页面直接渲染一份真实扫描的输出样例，不要求访客做任何事。
+2. **零安装自测**：用 File System Access API 让访客在自己的浏览器里选目录，
+   分析全程在本地完成，报告就地渲染，一个字节都不出网、不写入任何文件。
+   支持选项目目录（只读该项目下的 `.agents/skills` 与 `.codex/skills`）或直接选 Skill 目录。
+3. **命令行方式**：给出"下载 → 自己看 → 再运行"三步命令（不是管道执行），
+   并展示版本、体积、SHA-256，附 `certutil` 自查方法，源码可直接在页面上展开读完。
+
+配套的服务端接口：
+
+- `GET /cli/skill-dock.js`：以 `text/plain` 单文件形式发布命令行脚本，`no-store`，附 `nosniff`。
+- `GET /api/cli/info`：返回版本、体积与 SHA-256，版本号从脚本自身读取，避免两处维护。
+- `GET /download/desktop`：流式回传最新桌面安装包（从 `outputs/` 取 mtime 最新且含 `Setup` 的 `.exe`）。
+- `GET /api/desktop/info`：返回安装包文件名、体积与 SHA-256（流式计算，不整份读进内存）。
+
+脚本通过 `git ls-files` 进入发布包，无需改动部署清单。
+
+## 命令行扫描（自动化与 CI）
+
+~~~powershell
+npm run scan                                   # 扫描六个默认用户级目录
+node bin/skill-dock.js scan .                  # 只扫描指定项目的 .agents/skills 与 .codex/skills
+node bin/skill-dock.js scan . --json out.json  # 同时输出机器可读报告
+node bin/skill-dock.js scan . --include-scripts
+node bin/skill-dock.js scan . --no-follow-links  # 不跟随符号链接与 junction
+~~~
+
+报告包含五类信息：
+
+- **扫描根状态**：每个目录是否存在、发现多少个 Skill、跟随了多少个链接。
+- **上传预演**：默认只把 `.md` 一类文档文件计入"将来可上传"的集合，`scripts/` 下的可执行代码默认排除，并分别给出文件数与体积。
+- **初始列表预算**：累计名称与描述字符数，和 Codex 初始技能列表的 8000 字符上限对比。超过后 Codex 会先缩短描述，再多则省略部分 Skill。
+- **链接记录**：默认跟随符号链接与 junction——"把 Skill 链接进项目目录"是 Skill Dock 做项目级隔离的方式。
+  指向扫描根目录之外的目标会逐个列出真实路径；失效链接、链接成环与无权限目标各自告警。
+  同一链接在一次扫描里只计一次。完整清单见 JSON 报告的 `links` 字段。
+- **需要注意**：同名 Skill（Codex 不合并同名项）、缺少 description、描述过长、含脚本文件。
+
+### 关于"使用统计"的口径
+
+桌面版会读本机 Codex 会话日志，给出每个 Skill 的**被引用次数**。
+
+**口径是 `referenced`，不是 `invoked`。** 对全部 475 个真实会话日志抽样后确认：
+Codex 不把"技能被调用"记成工具调用，日志里引用 `SKILL.md` 的调用几乎全是 agent 在读/写
+`SKILL.md` 文件本身。所以这是弱代理指标，界面上如实标注为"被引用"，不能当使用频率看。
+真正可靠的 invoked 数据要等 Codex 侧显式上报，或 M2 落盘后由 Skill Dock 自己记录启用历史。
+
+浏览器侧的两条扫描路径（首页授权目录、`/scan/` 展示页）走 File System Access API，
+该 API 看不到链接，因此**浏览器化简的结果可能与本机命令行不一致**。需要链接信息时用桌面版或命令行。
+
+为什么值得做这些：它把"我要读你电脑"的叙事换成"你自己跑、自己看、没人替你做决定"，
+并且报告本身就是最好的隐私说明。
 
 ## 架构
 
 ~~~text
 Algorithm Lab 统一账号 API（保留 SSO + PKCE 兼容）
       ↓
-Windows 只读助手 / 浏览器目录授权 → Skill Dock Web
+桌面应用（C 通道·只读） / 浏览器目录授权（A 通道） / CLI（B 通道） → Skill Dock Web
       ↓
 GPU PostgreSQL
 skill_users → skills → skill_versions → skill_files(BYTEA)
 ~~~
+
+共享扫描内核：`src/scanner/index.js`（无 Electron、无 HTTP、无 cwd 依赖，纯函数式）。
+桌面主进程与 CLI 都 require 它；契约测试 `test/scanner.test.js` 兜住 `docs/solution.md §11.1`
+的四条不可让步约束（默认跟随链接 / 不拒绝跳出根 / 哈希用逻辑路径 / 同一链接只记一次）。
 
 ## 本地开发
 
@@ -41,7 +122,8 @@ npm run dev
 
 访问 **http://127.0.0.1:8787**。
 
-本地助手默认连接公网 Skill Dock；启动后会自动打开已配对页面：
+本地助手（B 通道 CLI）默认连接公网 Skill Dock；启动后会自动打开已配对页面。
+这条路径面向自动化与 CI，**首页不再引导普通用户走它**：
 
 ~~~powershell
 npm run helper
@@ -54,7 +136,7 @@ $env:SKILL_DOCK_URL = "http://127.0.0.1:8787"
 npm run helper
 ~~~
 
-助手只读三个内置目录，配对令牌保存在当前 Windows 用户目录中；关闭助手窗口即可停止。
+助手只读六个内置目录，配对令牌保存在当前 Windows 用户目录中；关闭助手窗口即可停止。
 
 ## GPU 部署
 
@@ -101,9 +183,17 @@ bash /workspace/projects/skill-atlas/current/deploy/verify-public.sh
 
 ~~~powershell
 npm test
+node --check src/main.js
+node --check src/preload.js
+node --check src/settings.js
+node --check src/usage-scanner.js
+node --check src/scanner/index.js
 node --check src/web-server.js
 node --check src/web/app.js
 node --check src/web/helper/skill-dock-helper.js
+node --check src/web/scan/scan.js
+node --check src/renderer/app.js
+node --check bin/skill-dock.js
 ~~~
 
 ~~~bash

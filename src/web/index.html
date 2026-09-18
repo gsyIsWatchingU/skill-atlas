@@ -6,7 +6,7 @@
   <meta name="description" content="登录后同步自己的 Agent Skills，也可浏览和分享社区 Skill。">
   <title>Skill Dock｜个人同步与 Skill 社区</title>
   <link rel="icon" href="/icon.svg?v=2.3.2" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=2.4.2">
+  <link rel="stylesheet" href="/styles.css?v=2.6.1">
 </head>
 <body>
   <div class="page-shell">
@@ -37,9 +37,10 @@
           <p class="hero-copy">私有 Skill 仅自己可见；发布到社区后，其他用户才能浏览和下载。</p>
         </div>
         <div class="hero-actions">
-          <button id="scan-directory" class="button primary" type="button">扫描默认目录</button>
-          <span class="hero-action-hint">连接本地助手后，无需选择文件夹</span>
+          <button id="scan-directory" class="button primary" type="button">选择文件夹扫描</button>
+          <span class="hero-action-hint">桌面版装好后无需选择文件夹；网页端受浏览器限制需手动授权</span>
           <button id="refresh-cloud" class="button secondary" type="button">刷新云端 Skill</button>
+          <a class="hero-scan-link" href="/scan/">不用安装，先看看它会打印什么</a>
           <input id="directory-input" class="visually-hidden" type="file" webkitdirectory multiple>
         </div>
       </section>
@@ -49,21 +50,21 @@
         <span>助手只读默认 Skill 目录，且仅监听本机地址。扫描结果留在浏览器，点击同步或发布后才会上传。</span>
       </section>
 
-      <section class="helper-panel" aria-label="本地助手">
+      <section class="desktop-panel" aria-label="桌面应用">
         <div>
-          <p class="section-kicker">LOCAL HELPER</p>
-          <h2>本地扫描助手</h2>
-          <p id="helper-copy">试用版需 Node.js 20+；运行后直达三个默认目录。首次连接时 Chrome 可能询问本地网络权限。</p>
+          <p class="section-kicker">DESKTOP APP</p>
+          <h2>装一次，之后点一下就能扫</h2>
+          <p id="desktop-copy">桌面版直接读取本机 Skill 目录，不用下载脚本、不用开命令行、不用先选文件夹。当前版本<strong>只读</strong>：不建链接、不改配置、不删文件，扫描结果只留在本机。</p>
         </div>
-        <div class="helper-actions">
-          <div id="helper-status" class="helper-connection-status disconnected" role="status" aria-live="polite">
-            <span class="helper-status-dot" aria-hidden="true"></span>
-            <strong id="helper-status-label">未连接</strong>
-            <small id="helper-status-version"></small>
+        <div class="desktop-actions">
+          <div id="desktop-status" class="desktop-connection-status disconnected" role="status" aria-live="polite">
+            <span class="desktop-status-dot" aria-hidden="true"></span>
+            <strong id="desktop-status-label">未检测到桌面版</strong>
+            <small id="desktop-status-version"></small>
           </div>
-          <div class="helper-action-links">
-            <a class="helper-download-link" href="/helper/start-skill-dock-helper.cmd" download="启动 Skill Dock 助手.cmd">下载 Windows 助手 ↓</a>
-            <button id="detect-helper" class="text-button" type="button">重新检测</button>
+          <div class="desktop-action-links">
+            <a id="download-desktop" class="button primary compact" href="/download">下载桌面版</a>
+            <a class="text-button" href="/scan/">不想安装？先用零安装体检</a>
           </div>
         </div>
       </section>
@@ -85,6 +86,17 @@
         <article><span>我的云端</span><strong id="cloud-count">0</strong></article>
         <article><span>社区 Skill</span><strong id="community-count">0</strong></article>
         <article><span>版本不同</span><strong id="different-count">0</strong></article>
+      </section>
+
+      <section class="search-workspace" aria-label="搜索 Skill">
+        <div class="search-bar">
+          <label class="search-field" for="skill-search">
+            <span class="search-prompt" aria-hidden="true">&gt;_</span>
+            <input id="skill-search" type="search" placeholder="搜索 Skill 名称、描述、目录或来源…" autocomplete="off">
+          </label>
+          <button id="clear-search" class="button secondary" type="button" hidden>清空</button>
+          <span id="search-count" class="search-count" role="status" aria-live="polite"></span>
+        </div>
       </section>
 
       <section class="workspace">
@@ -184,6 +196,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=2.4.1" defer></script>
+  <script src="/dedup.js?v=1.0.0" defer></script>
+  <script src="/app.js?v=2.6.2" defer></script>
 </body>
 </html>

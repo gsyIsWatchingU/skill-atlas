@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const { createHash } = require('node:crypto');
 const {
   computeVersionHash,
@@ -97,7 +100,11 @@ function createMemoryRepository() {
         ...validated.package,
         id,
         visibility,
-        skill: { ...validated.package.skill, authorName: user.displayName }
+        skill: {
+          ...validated.package.skill,
+          zhSummary: validated.metadata.zhSummary || '',
+          authorName: user.displayName
+        }
       });
       return metadata;
     },
@@ -160,7 +167,48 @@ test('计算稳定版本并拒绝不安全路径', () => {
   assert.throws(() => validatePackage(payload), /不安全的文件路径/);
 });
 
-test('网页提供本地助手启动器并允许连接回环地址', async (t) => {
+test('公网页面提供可校验的命令行脚本与本地自测入口', async (t) => {
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({ repository });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+  });
+
+  const onDisk = await fs.readFile(path.join(__dirname, '..', 'bin', 'skill-dock.js'));
+
+  const info = await fetch(baseUrl + '/api/cli/info').then((response) => response.json());
+  assert.equal(info.cli.available, true);
+  assert.equal(info.cli.sizeBytes, onDisk.length);
+  assert.equal(info.cli.sha256, sha256(onDisk));
+  assert.match(info.cli.version, /^\d+\.\d+\.\d+$/);
+
+  const script = await fetch(baseUrl + '/cli/skill-dock.js');
+  assert.equal(script.status, 200);
+  assert.match(script.headers.get('content-type'), /text\/plain/);
+  assert.equal(script.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(sha256(Buffer.from(await script.arrayBuffer())), info.cli.sha256);
+
+  const rejected = await fetch(baseUrl + '/cli/skill-dock.js', { method: 'POST' });
+  assert.ok([403, 405].includes(rejected.status), '命令行脚本不接受写入请求');
+
+  const page = await fetch(baseUrl + '/scan/');
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type'), /text\/html/);
+  assert.match(await page.text(), /不用装任何东西/);
+
+  const pageWithoutSlash = await fetch(baseUrl + '/scan');
+  assert.equal(pageWithoutSlash.status, 200);
+  assert.match(pageWithoutSlash.headers.get('content-type'), /text\/html/);
+
+  assert.equal((await fetch(baseUrl + '/scan/scan.css')).status, 200);
+  assert.equal((await fetch(baseUrl + '/scan/scan.js')).status, 200);
+  assert.equal((await fetch(baseUrl + '/scan/missing.html')).status, 404);
+});
+
+test('首页引导下载桌面版，并保留本地助手作为可选入口', async (t) => {
   const repository = createMemoryRepository();
   const server = createSkillAtlasServer({ repository });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -172,16 +220,18 @@ test('网页提供本地助手启动器并允许连接回环地址', async (t) =
 
   const home = await fetch(baseUrl + '/');
   assert.equal(home.status, 200);
+  // 本地助手（B 通道 CLI）仍可连接回环地址
   assert.match(home.headers.get('content-security-policy'), /http:\/\/127\.0\.0\.1:18787/);
   const homeHtml = await home.text();
   assert.match(homeHtml, /icon\.svg\?v=2\.3\.2/);
-  assert.match(homeHtml, /class="helper-download-link"[^>]*>下载 Windows 助手/);
-  assert.match(homeHtml, /class="helper-connection-status disconnected"[^>]*role="status"/);
-  assert.match(homeHtml, /id="detect-helper" class="text-button"[^>]*>重新检测/);
 
-  const launcher = await fetch(baseUrl + '/helper/start-skill-dock-helper.cmd');
-  assert.equal(launcher.status, 200);
-  assert.match(await launcher.text(), /skill-dock-helper\.js\?v=0\.1\.0/);
+  // 首页主引导必须是桌面版下载，而不是"复制一条命令去跑脚本"
+  assert.match(homeHtml, /id="download-desktop"[^>]*href="\/download"/);
+  assert.match(homeHtml, /id="desktop-status" class="desktop-connection-status disconnected"[^>]*role="status"/);
+  assert.doesNotMatch(homeHtml, /id="helper-command-text"/, '复制命令跑脚本的引导必须已移除');
+  assert.doesNotMatch(homeHtml, /id="copy-helper-command"/, '复制命令按钮必须已移除');
+
+  // 命令行脚本仍可下载（自动化/CI 入口）
   assert.equal((await fetch(baseUrl + '/helper/skill-dock-helper.js')).status, 200);
 
   const icon = await fetch(baseUrl + '/icon.svg');
@@ -189,6 +239,59 @@ test('网页提供本地助手启动器并允许连接回环地址', async (t) =
   const iconSvg = await icon.text();
   assert.match(iconSvg, /x="78" y="78" width="868" height="868" rx="182" fill="#fff"/);
   assert.match(iconSvg, /translate\(225\.28 225\.28\) scale\(\.56\)/);
+});
+
+test('桌面安装包接口可用，未产出时优雅降级', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-desktop-dl-'));
+  const outputDir = path.join(home, 'outputs');
+  await fs.mkdir(outputDir, { recursive: true });
+  // 用一个小文件冒充安装包，避免测试真的去读 90 MB
+  await fs.writeFile(path.join(outputDir, 'Skill-Dock-Setup-2.2.0.exe'), 'fake installer\n', 'utf8');
+  // 非 Setup 的 portable 单文件不应被选中
+  await fs.writeFile(path.join(outputDir, 'Skill Dock 2.2.0.exe'), 'portable\n', 'utf8');
+
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({ repository, desktopOutputDir: outputDir });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  const info = await fetch(baseUrl + '/api/desktop/info');
+  assert.equal(info.status, 200);
+  const payload = await info.json();
+  assert.equal(payload.desktop.available, true);
+  assert.equal(payload.desktop.fileName, 'Skill-Dock-Setup-2.2.0.exe');
+  assert.match(payload.desktop.sha256, /^[0-9a-f]{64}$/);
+
+  const download = await fetch(baseUrl + '/download/desktop');
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), 'fake installer\n');
+  assert.match(download.headers.get('content-disposition') || '', /attachment/);
+});
+
+test('桌面安装包未产出时返回 404 与 available:false', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-desktop-none-'));
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({
+    repository,
+    desktopOutputDir: path.join(home, 'not-created')
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  const info = await fetch(baseUrl + '/api/desktop/info');
+  assert.equal(info.status, 200);
+  assert.equal((await info.json()).desktop.available, false);
+  assert.equal((await fetch(baseUrl + '/download/desktop')).status, 404);
 });
 
 test('站内邮箱表单调用统一账号服务并建立本站会话', async (t) => {
@@ -323,4 +426,76 @@ test('统一账号登录后按账号隔离私有 Skill，并公开社区 Skill',
     method: 'DELETE',
     headers: { Cookie: cookieB, Origin: baseUrl }
   })).status, 404);
+});
+
+test('上传 Skill 时自动生成中文简介并随下载包返回', async (t) => {
+  let pendingUser = null;
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({
+    repository,
+    ssoAuthBaseUrl: 'https://accounts.example.test',
+    publicUrl: 'https://skills.example.test',
+    exchangeSsoCode: async (_baseUrl, payload) => pendingUser
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+  });
+
+  pendingUser = { id: 'user-zh', email: 'zh@example.test', displayName: '中文用户', image: null };
+  const cookie = await login(baseUrl, pendingUser);
+  const headers = { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/json' };
+
+  // 未提供中文简介 → 服务端从英文描述自动生成
+  const autoPackage = {
+    schemaVersion: 1,
+    visibility: 'community',
+    skill: {
+      name: 'create-spreadsheet-skill',
+      description: 'Create a spreadsheet using a dashboard template for the user.',
+      folderName: 'create-spreadsheet-skill',
+      platform: 'codex'
+    },
+    files: [
+      {
+        path: 'SKILL.md',
+        contentBase64: Buffer.from('---\nname: create-spreadsheet-skill\ndescription: Create a spreadsheet.\n---\n').toString('base64')
+      }
+    ]
+  };
+  const autoResponse = await fetch(baseUrl + '/api/skills', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(autoPackage)
+  });
+  assert.equal(autoResponse.status, 201);
+  const autoSkill = (await autoResponse.json()).skill;
+  assert.ok(autoSkill.zhSummary, '缺少中文简介时服务端应自动生成');
+  assert.match(autoSkill.zhSummary, /「create-spreadsheet-skill」技能/);
+  assert.match(autoSkill.zhSummary, /创建/);
+  assert.match(autoSkill.zhSummary, /表格/);
+
+  // 已提供中文简介 → 原样保留
+  const customPackage = createPackage('custom-zh-skill', 'private');
+  customPackage.skill = { ...customPackage.skill, zhSummary: '自定义的中文简介内容' };
+  const customResponse = await fetch(baseUrl + '/api/skills', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(customPackage)
+  });
+  assert.equal(customResponse.status, 201);
+  assert.equal((await customResponse.json()).skill.zhSummary, '自定义的中文简介内容');
+
+  // 列表接口返回中文简介，且未登录也能下载社区 Skill（下载包）
+  const mine = await fetch(baseUrl + '/api/skills?scope=mine', { headers: { Cookie: cookie } })
+    .then((response) => response.json());
+  const autoRow = mine.skills.find((skill) => skill.id === autoSkill.id);
+  assert.equal(autoRow.zhSummary, autoSkill.zhSummary);
+  const download = await fetch(baseUrl + '/api/skills/' + autoSkill.id);
+  assert.equal(download.status, 200);
+  const downloadPackage = await download.json();
+  assert.equal(downloadPackage.skill.zhSummary, autoSkill.zhSummary);
+  assert.ok(downloadPackage.files.length > 0, '下载包应包含 Skill 文件');
 });

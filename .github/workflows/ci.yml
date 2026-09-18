@@ -32,15 +32,27 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+        env:
+          # CI 只跑测试与语法检查，不需要 Electron 的二进制（约 100 MB）。
+          # 桌面打包在本地跑 npm run dist，不占 CI 时间。
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
       - name: 运行测试
         run: npm test
 
       - name: 检查语法
         run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/settings.js
+          node --check src/usage-scanner.js
+          node --check src/scanner/index.js
+          node --check src/renderer/app.js
           node --check src/web-server.js
           node --check src/web/app.js
           node --check src/web/helper/skill-dock-helper.js
+          node --check src/web/scan/scan.js
+          node --check bin/skill-dock.js
 
       - name: 生成部署包
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

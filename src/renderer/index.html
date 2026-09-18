@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+  <title>Skill Dock</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">SD</span>
+        <div class="brand-text">
+          <strong>Skill Dock</strong>
+          <span id="app-version" class="brand-version">v—</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="nav-item is-active" data-view="catalog" data-scope="all" type="button">
+          <span>全部技能</span><span class="nav-count" data-count="all">0</span>
+        </button>
+        <button class="nav-item" data-view="usage" data-scope="usage" type="button">
+          <span>使用分析</span><span class="nav-count" data-count="usage">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="codex" type="button">
+          <span>Codex</span><span class="nav-count" data-count="codex">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="trae" type="button">
+          <span>Trae</span><span class="nav-count" data-count="trae">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="shared" type="button">
+          <span>共享目录</span><span class="nav-count" data-count="shared">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="duplicate" type="button">
+          <span>重名技能</span><span class="nav-count" data-count="duplicate">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="unused" type="button">
+          <span>从未调用</span><span class="nav-count" data-count="unused">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="sidebar-head">
+          <span>扫描目录</span>
+          <button id="manage-roots" class="text-button" type="button">添加</button>
+        </div>
+        <ul class="root-list" id="root-list"></ul>
+      </div>
+
+      <div class="sidebar-foot">
+        <p class="readonly-note">
+          <strong>当前版本只读。</strong>
+          不建链接、不改 config.toml、不删除任何文件；扫描结果只留在本机内存。
+          写入与回滚在后续版本提供。
+        </p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search-wrap">
+          <input id="search" class="search" type="search" placeholder="搜索 Skill 名称或描述　Ctrl+K" autocomplete="off">
+        </div>
+        <div class="topbar-actions">
+          <button id="export-inventory" class="ghost-button" type="button">导出清单</button>
+          <button id="reload-ui" class="ghost-button" type="button">重新加载界面</button>
+          <button id="rescan" class="primary-button" type="button">重新扫描</button>
+        </div>
+      </header>
+
+      <section class="summary-grid" id="summary-grid">
+        <div class="summary-card">
+          <span class="summary-label">已发现技能</span>
+          <strong class="summary-value" id="metric-skills">0</strong>
+          <span class="summary-hint" id="metric-skills-hint">—</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">扫描根</span>
+          <strong class="summary-value" id="metric-roots">0</strong>
+          <span class="summary-hint" id="metric-roots-hint">—</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">被引用过（referenced）</span>
+          <strong class="summary-value" id="metric-invoked">0</strong>
+          <span class="summary-hint" id="metric-invoked-hint">—</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">跟随的链接</span>
+          <strong class="summary-value" id="metric-links">0</strong>
+          <span class="summary-hint" id="metric-links-hint">—</span>
+        </div>
+      </section>
+
+      <section class="catalog-head">
+        <div class="filters">
+          <label class="field">
+            <span>范围</span>
+            <select id="scope-filter"></select>
+          </label>
+          <label class="field">
+            <span>排序</span>
+            <select id="sort-order">
+              <option value="name">名称</option>
+              <option value="usage">调用次数</option>
+              <option value="modified">修改时间</option>
+              <option value="source">来源</option>
+            </select>
+          </label>
+        </div>
+        <p class="catalog-hint" id="catalog-hint">正在扫描本机 Skill…</p>
+      </section>
+
+      <section id="view-catalog" class="view">
+        <div class="skill-grid" id="skill-grid"></div>
+        <p class="empty" id="catalog-empty" hidden>没有符合条件的 Skill。</p>
+      </section>
+
+      <section id="view-usage" class="view" hidden>
+        <div class="usage-grid">
+          <div class="panel">
+            <h2 class="panel-title">近 30 天调用</h2>
+            <p class="panel-note" id="usage-note">—</p>
+            <div class="usage-trend" id="usage-trend"></div>
+          </div>
+          <div class="panel">
+            <h2 class="panel-title">调用最多的 Skill</h2>
+            <ol class="usage-ranking" id="usage-ranking"></ol>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="panel-title">扫描到但从未被引用</h2>
+          <p class="panel-note">
+            口径是 <strong>referenced</strong>：该 Skill 的 SKILL.md 在本机 Codex 会话日志里
+            被工具调用引用过——多数是读取或编辑 <code>SKILL.md</code> 本身，
+            <strong>不等于这个技能被用来完成过任务</strong>。Codex 目前不记录真实调用，
+            所以这是弱代理指标，只能当线索看，不能当使用频率。
+          </p>
+          <ul class="unused-list" id="unused-list"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="detail" id="detail-panel" hidden>
+    <header class="detail-head">
+      <div class="detail-title">
+        <span class="avatar" id="detail-avatar">S</span>
+        <div>
+          <h2 id="detail-name">—</h2>
+          <div class="pill-row" id="detail-pills"></div>
+        </div>
+      </div>
+      <button id="detail-close" class="icon-button" type="button" aria-label="关闭">×</button>
+    </header>
+    <div class="detail-body">
+      <div id="detail-alert" class="detail-alert" hidden></div>
+
+      <section class="detail-block">
+        <h3>简介</h3>
+        <p id="detail-description" class="detail-text">—</p>
+        <p class="detail-meta" id="detail-description-source"></p>
+      </section>
+
+      <section class="detail-block">
+        <h3>位置与规模</h3>
+        <dl class="detail-dl">
+          <dt>来源</dt><dd id="detail-source">—</dd>
+          <dt>目录</dt><dd id="detail-path" class="mono">—</dd>
+          <dt>文件</dt><dd id="detail-files">—</dd>
+          <dt>大小</dt><dd id="detail-size">—</dd>
+          <dt>修改</dt><dd id="detail-modified">—</dd>
+          <dt>版本哈希</dt><dd id="detail-hash" class="mono">—</dd>
+        </dl>
+      </section>
+
+      <section class="detail-block">
+        <h3>被引用最多（referenced）</h3>
+        <dl class="detail-dl">
+          <dt>累计</dt><dd id="detail-usage">—</dd>
+          <dt>近 30 天</dt><dd id="detail-usage30">—</dd>
+          <dt>最近一次</dt><dd id="detail-lastused">—</dd>
+        </dl>
+      </section>
+
+      <section class="detail-block">
+        <h3>操作</h3>
+        <div class="detail-actions">
+          <button id="open-skill" type="button">打开 SKILL.md</button>
+          <button id="reveal-skill" type="button">在资源管理器中显示</button>
+          <button id="copy-path" type="button">复制目录路径</button>
+          <button id="edit-description" type="button">编辑中文简介</button>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <dialog id="description-dialog" class="dialog">
+    <form method="dialog">
+      <h2>编辑中文简介</h2>
+      <p class="dialog-note">只保存在本机设置里，不会写回 SKILL.md，也不会覆盖原文件。</p>
+      <textarea id="description-input" maxlength="300" rows="4" placeholder="给这个 Skill 写一句自己看得懂的说明"></textarea>
+      <div class="dialog-foot">
+        <span id="description-count" class="counter">0 / 300</span>
+        <div class="dialog-buttons">
+          <button id="clear-description" class="ghost-button" type="button">清空</button>
+          <button id="cancel-description" class="ghost-button" type="button">取消</button>
+          <button id="save-description" class="primary-button" type="button">保存</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

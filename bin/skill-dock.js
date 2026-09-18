@@ -8,10 +8,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
+// 扫描逻辑来自共享内核，与桌面宿主（C 通道）用同一份实现，避免语义漂移。
 const {
   DEFAULT_ROOTS,
   scanRoots
-} = require('../src/web/helper/skill-dock-helper.js');
+} = require('../src/scanner');
 
 const CLI_VERSION = '0.1.0';
 
@@ -402,7 +403,7 @@ async function main() {
     ? explicit.flatMap((target) => projectRoots(target))
     : DEFAULT_ROOTS;
 
-  const scanResult = await scanRoots({ roots, token: 'skill-dock-cli', followLinks: options.followLinks });
+  const scanResult = await scanRoots({ roots, includeFiles: true, followLinks: options.followLinks });
   const summary = summarizeSkills(scanResult.skills, options);
   const warnings = findWarnings(summary.listed, scanResult.links);
 
