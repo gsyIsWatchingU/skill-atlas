@@ -22,11 +22,25 @@
 
 ~~~powershell
 npm install
-npm run desktop     # 开发模式启动
-npm run dist        # 产出 Windows 安装包到 outputs/
+npm run desktop            # 启动桌面应用
+npm run desktop:headless   # 无桌面会话（远程/CI）用：自动走软件渲染
+npm run dist               # 产出 Windows 安装包到 outputs/
 ~~~
 
 安装包命名 `Skill-Dock-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
+
+**启动必须经 `npm run desktop`，不要直接 `electron .`。** 启动器
+`scripts/desktop.js` 抹平两个会让"应用起不来"看起来像代码 bug 的环境坑：
+
+- **`ELECTRON_RUN_AS_NODE=1`**（某些终端环境会预设）会让 Electron 退化成纯 Node 进程，
+  不初始化 Chromium、不注入 `electron` 模块，于是 `require('electron')` 解构出 `undefined`，
+  报 `Cannot read properties of undefined (reading 'commandLine')`。启动器会剔除该变量。
+  自检：`electron.exe -e "console.log(process.type)"` 应输出 `browser`，输出 `undefined` 就是被降级了。
+- **无桌面会话下 GPU 进程 FATAL**（`GPU process isn't usable`）表现为闪退，
+  `--headless` 会加上 `--no-sandbox --disable-gpu --in-process-gpu`。
+
+注：打包产物**不受** `node_modules/electron` 遮蔽问题影响 —— electron-builder 会重命名主 exe，
+且 asar 内不含 `node_modules/electron`。该问题只存在于开发态，已由启动器解决。
 
 **当前版本只读。** 界面里明确写着这句话：不建链接、不改 `config.toml`、不删除任何文件，
 扫描结果只留在本机内存。写入与回滚（Diff 预览 + 一键回滚）在 M2 提供。
