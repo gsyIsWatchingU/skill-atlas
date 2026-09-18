@@ -48,6 +48,7 @@ jobs:
           node --check src/usage-scanner.js
           node --check src/scanner/index.js
           node --check src/renderer/app.js
+          node --check scripts/desktop.js
           node --check src/web-server.js
           node --check src/web/app.js
           node --check src/web/helper/skill-dock-helper.js
