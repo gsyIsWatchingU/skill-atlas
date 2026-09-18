@@ -91,6 +91,7 @@ jobs:
           path: ${{ runner.temp }}/skill-atlas-release
 
       - name: 发布并验证
+        id: release
         shell: bash
         run: |
           set -euo pipefail
@@ -108,3 +109,26 @@ jobs:
           trap 'rm -rf -- "$release_dir"' EXIT
           tar -xzf "$archive" -C "$release_dir"
           bash "$release_dir/deploy/apply-release.sh" "$release_dir" "$DEPLOY_PATH" "$GITHUB_SHA"
+
+      # 部署失败时把分段计时日志上传成 artifact。
+      # 起因：失败只报「发布并验证」，GitHub 的 job 日志接口匿名访问返回 403，
+      # 拿不到具体卡在哪一段，只能靠猜。这段日志会记录每个阶段的耗时、
+      # npm ci 装了多少包、supervisor 状态序列、以及验证失败的具体字段。
+      - name: 收集部署诊断日志
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/deploy-diag"
+          find "$DEPLOY_PATH/run" -maxdepth 1 -name 'deploy-*.log' -newermt '-30 minutes' \
+            -exec cp -v {} "$RUNNER_TEMP/deploy-diag/" \; 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/deploy-diag" || true
+
+      - name: 上传部署诊断日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-diag-${{ github.sha }}
+          path: ${{ runner.temp }}/deploy-diag/
+          if-no-files-found: warn
+          retention-days: 7

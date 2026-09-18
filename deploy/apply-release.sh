@@ -76,16 +76,44 @@ SWITCHED=0
 
 mkdir -p "${RELEASES_ROOT}" "${RUN_ROOT}" "${STATE_ROOT}/logs"
 
+# 分段计时诊断：只记录阶段与耗时，不改变任何控制流、不吞错误、不开 set -x（避免 .env 泄进日志）。
+# 排查过一次「部署 46 秒后失败但拿不到 CI 日志」，加这个是为了下次能直接看出卡在哪一段。
+DIAG_LOG="${RUN_ROOT}/deploy-${COMMIT_SHA}.log"
+diag() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "${DIAG_LOG}" >&2
+}
+stage_start() { STAGE_NAME="$1"; STAGE_AT="$(date +%s)"; diag "stage_start ${STAGE_NAME}"; }
+stage_done() {
+  local now; now="$(date +%s)"
+  diag "stage_done ${STAGE_NAME} duration_s=$((now - STAGE_AT))"
+}
+diag "deploy_begin commit=${COMMIT_SHA} node=${NODE_DIR} root=${STATE_ROOT}"
+
 if [[ ! -d "${RELEASE_DIR}" ]]; then
   [[ "${INCOMING_DIR}" == "${RELEASES_ROOT}/.incoming-${COMMIT_SHA}" ]]
   rm -rf -- "${INCOMING_DIR}"
   mkdir -p "${INCOMING_DIR}"
   trap 'rm -rf -- "${INCOMING_DIR}"' EXIT
+
+  stage_start extract
   tar -C "${SOURCE_DIR}" --verbatim-files-from -cf - -T "${MANIFEST}" | tar -C "${INCOMING_DIR}" -xf -
   install -m 0644 "${MANIFEST}" "${INCOMING_DIR}/.deploy-manifest"
   chmod +x "${INCOMING_DIR}"/deploy/*.sh
-  PATH="${NODE_DIR}:${PATH}" "${NODE_DIR}/npm" ci --omit=dev --prefix "${INCOMING_DIR}"
+  stage_done
+
+  # --no-audit --no-fund：部署阶段不需要审计与赞助信息，减少非必要外部请求。
+  stage_start npm_ci
+  PATH="${NODE_DIR}:${PATH}" "${NODE_DIR}/npm" ci --omit=dev --no-audit --no-fund --prefix "${INCOMING_DIR}"
+  stage_done
+
+  # 记录生产依赖树规模，用于确认 --omit=dev 是否真的排掉了桌面构建依赖
+  if [[ -d "${INCOMING_DIR}/node_modules" ]]; then
+    diag "npm_ci_modules=$(find "${INCOMING_DIR}/node_modules" -maxdepth 1 -mindepth 1 -type d | wc -l) electron_present=$([[ -d "${INCOMING_DIR}/node_modules/electron" ]] && echo yes || echo no)"
+  fi
+
+  stage_start release_promote
   mv -- "${INCOMING_DIR}" "${RELEASE_DIR}"
+  stage_done
   trap - EXIT
 fi
 
@@ -103,6 +131,7 @@ fi
 rollback() {
   local exit_code=$?
   trap - ERR
+  diag "rollback_begin exit_code=${exit_code} switched=${SWITCHED}"
   if [[ "${SWITCHED}" == "1" ]]; then
     if [[ -n "${OLD_TARGET}" ]]; then
       ln -sfn "${OLD_TARGET}" "${STATE_ROOT}/current.rollback"
@@ -114,17 +143,33 @@ rollback() {
       echo "首次部署失败，已移除 current 链接" >&2
     fi
   fi
+  diag "rollback_done target=${OLD_TARGET:-none}"
   exit "${exit_code}"
 }
 trap rollback ERR
 
+stage_start switch_current
 ln -sfn "releases/${COMMIT_SHA}" "${NEXT_LINK}"
 mv -Tf "${NEXT_LINK}" "${CURRENT_LINK}"
 SWITCHED=1
+stage_done
 
+stage_start supervisor_restart
 supervisorctl -c "${SUPERVISOR_CONFIG}" restart skill-atlas
+stage_done
+
+# restart 返回 0 不等于进程健康；记录状态序列，区分 RUNNING / BACKOFF / FATAL / EXITED
+for delay in 0 2 5; do
+  sleep "${delay}"
+  diag "supervisor_status t=${delay}s $(supervisorctl -c "${SUPERVISOR_CONFIG}" status skill-atlas 2>&1 | tr '\n' ' ')"
+done
+
+stage_start verify_public
 SKILL_ATLAS_STATE_ROOT="${STATE_ROOT}" bash "${CURRENT_LINK}/deploy/verify-public.sh"
+stage_done
+
 printf '%s\n' "${COMMIT_SHA}" > "${RUN_ROOT}/deployed-commit"
 trap - ERR
 
+diag "deploy_ok commit=${COMMIT_SHA}"
 echo "已部署并验证版本：${COMMIT_SHA}"
