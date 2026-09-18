@@ -140,3 +140,62 @@ jobs:
           path: ${{ runner.temp }}/deploy-diag/
           if-no-files-found: warn
           retention-days: 7
+
+  desktop-release:
+    name: 构建并发布 Windows 安装包
+    needs: quality
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 每次推到 main 都要出一个"新"包，版本号必须严格递增，否则
+      # electron-builder 会认为是同一个版本、把旧产物顶掉。
+      # 做法：取 package.json 里的基线版本，挂上 CI run number 作为预发布后缀，
+      # 例如 2.2.0 -> 2.2.0-beta.42。这是预发布版，GitHub 会自动打 prerelease 标记。
+      - name: 计算预发布版本号
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(node -p "require('./package.json').version")
+          version="${base}-beta.${GITHUB_RUN_NUMBER}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          npm version "$version" --no-git-tag-version
+
+      # 打包前先按真实启动路径跑一遍扫描自检，避免打出来的包在用户那边起不来。
+      # windows-latest 是远程会话，必须加 --headless 走软件渲染，否则 GPU 进程 FATAL。
+      - name: 桌面端启动自检
+        run: node scripts/desktop.js --headless --smoke
+
+      - name: 构建并发布到 GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish always
+
+      # 双保险：除了挂到 GitHub Release，也留一份 CI artifact 备查，
+      # 万一 Release 上传挂了还能从 Actions 里把 exe 捞出来。
+      - name: 留存安装包与更新元数据
+        uses: actions/upload-artifact@v4
+        with:
+          name: Skill-Dock-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            outputs/*.exe
+            outputs/*.yml
+            outputs/*.blockmap
+          if-no-files-found: error
+          retention-days: 14

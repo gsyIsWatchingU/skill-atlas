@@ -24,10 +24,19 @@
 npm install
 npm run desktop            # 启动桌面应用
 npm run desktop:headless   # 无桌面会话（远程/CI）用：自动走软件渲染
+npm run desktop:smoke      # 不弹窗自检：跑一遍真实扫描流水线，退出码表达结果
 npm run dist               # 产出 Windows 安装包到 outputs/
 ~~~
 
+`desktop:smoke` 走与点击「重新扫描」完全相同的代码路径（设置 → 扫描内核 → 使用统计），
+把摘要打到 stdout（例如 `[smoke] {"ok":true,"skills":68,"roots":"3/6"}`），
+适合打包前后快速确认桌面端在这台机器上可用，也方便 CI 复现。
+
 安装包命名 `Skill-Dock-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
+
+**从 GitHub Releases 下载**：每次推到 `main`，CI 会在 Windows Runner 上自动出一份 NSIS 安装包并挂到
+[Releases](https://github.com/gsyIsWatchingU/skill-atlas/releases)，版本号形如 `2.2.0-beta.<run 号>`，
+属于 prerelease。打开 Releases 页选最新一条，下载 `Skill-Dock-Setup-*.exe` 即可。
 
 **启动必须经 `npm run desktop`，不要直接 `electron .`。** 启动器
 `scripts/desktop.js` 抹平两个会让"应用起不来"看起来像代码 bug 的环境坑：
@@ -176,7 +185,13 @@ bash deploy/start.sh
 
 ## 自动部署
 
-推送到 `main` 后，GitHub Actions 会先在公共 Runner 上测试并生成发布包，再由标签为 `skill-atlas-gpu` 的 GPU 自托管 Runner 下载发布包并完成：
+推送到 `main` 后，GitHub Actions 并行做两件事：
+
+1. **构建并发布桌面安装包**：在 `windows-latest` 上跑 `npm ci` + `electron-builder --win nsis`，
+   版本号自动挂上 CI run 号（如 `2.2.0-beta.42`），产物挂到
+   [Releases](https://github.com/gsyIsWatchingU/skill-atlas/releases)。
+2. **部署 Web 到 GPU**：在公共 Runner 上测试并生成发布包，再由标签为 `skill-atlas-gpu` 的 GPU 自托管
+   Runner 下载发布包并完成：
 
 1. 安装生产依赖并切换版本。
 2. 重启 `skill-atlas` Supervisor 进程。
@@ -197,6 +212,7 @@ bash /workspace/projects/skill-atlas/current/deploy/verify-public.sh
 
 ~~~powershell
 npm test
+npm run desktop:smoke   # 桌面端扫描路径自检（不弹窗）
 node --check src/main.js
 node --check src/preload.js
 node --check src/settings.js

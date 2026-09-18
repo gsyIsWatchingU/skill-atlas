@@ -15,6 +15,7 @@
     "scan": "node bin/skill-dock.js scan",
     "desktop": "node scripts/desktop.js",
     "desktop:headless": "node scripts/desktop.js --headless",
+    "desktop:smoke": "node scripts/desktop.js --smoke",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
     "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js"
@@ -36,6 +37,7 @@
     "files": [
       "src/main.js",
       "src/preload.js",
+      "src/cloud-client.js",
       "src/settings.js",
       "src/usage-scanner.js",
       "src/scanner/**/*",
@@ -63,6 +65,12 @@
       "createDesktopShortcut": true,
       "shortcutName": "Skill Dock"
     },
-    "publish": null
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gsyIsWatchingU",
+        "repo": "skill-atlas"
+      }
+    ]
   }
 }
