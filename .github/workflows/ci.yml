@@ -55,6 +55,14 @@ jobs:
           node --check src/web/scan/scan.js
           node --check bin/skill-dock.js
 
+      - name: 检查部署脚本语法
+        run: |
+          bash -n deploy/apply-release.sh
+          bash -n deploy/verify-public.sh
+          bash -n deploy/start.sh
+          bash -n deploy/backup-database.sh
+          bash -n deploy/init-gpu-database.sh
+
       - name: 生成部署包
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash

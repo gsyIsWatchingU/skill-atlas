@@ -17,7 +17,7 @@
     "desktop:headless": "node scripts/desktop.js --headless",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
-    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js"
+    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js"
   },
   "engines": {
     "node": ">=20"

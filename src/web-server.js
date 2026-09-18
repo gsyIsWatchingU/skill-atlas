@@ -390,8 +390,32 @@ function createPgRepository(databaseUrl) {
     'CREATE INDEX IF NOT EXISTS skill_sso_login_states_expires_at_idx ON skill_sso_login_states(expires_at);',
     'CREATE INDEX IF NOT EXISTS skill_versions_created_at_idx',
     '  ON skill_versions(created_at DESC);'
-  ].join('\n');
-  const initialized = pool.query(schemaSql);
+  ];
+
+  // 逐条执行而不是整批提交：多语句一次提交时，只要一条失败或拿不到锁，
+  // 整个批次会一起失败，而其中大部分语句其实是幂等且无害的。
+  // 逐条还能定位到具体是哪条语句出问题。每条都带 statement_timeout，
+  // 避免 ALTER TABLE 抢不到 ACCESS EXCLUSIVE 锁时无限挂起（会让健康检查一直超时）。
+  let schemaState = 'pending';
+  let schemaError = null;
+  const initialized = (async () => {
+    for (const statement of schemaSql) {
+      const label = statement.slice(0, 60).replace(/\s+/g, ' ');
+      try {
+        // 用连接级超时（不是 SET LOCAL —— 那需要显式事务才生效）：
+        // ALTER TABLE 抢不到 ACCESS EXCLUSIVE 锁时会一直等，进而拖死启动期的健康检查。
+        await pool.query({ text: statement, query_timeout: 10000, statement_timeout: 10000 });
+      } catch (error) {
+        // 单条失败不致命：记下来继续跑其余的，最后统一暴露状态。
+        console.error(`[schema] 语句失败（${label}）：${error.message}`);
+        if (!schemaError) schemaError = error;
+      }
+    }
+    schemaState = schemaError ? 'failed' : 'ready';
+    if (schemaState === 'failed') {
+      console.error(`[schema] 初始化未完全成功，首个错误：${schemaError.message}`);
+    }
+  })();
 
   function userFromRow(row) {
     return row ? {
@@ -434,14 +458,24 @@ function createPgRepository(databaseUrl) {
     '  AND v.version_hash = s.latest_version_hash'
   ].join('\n');
 
-  async function health() {
+  // 所有查询前统一过这道门：迁移没就绪就给出可诊断的错误，而不是无限等待。
+  async function ready() {
     await initialized;
+    if (schemaState === 'failed') {
+      const error = new Error(`数据库结构未就绪：${schemaError?.message || '未知原因'}`);
+      error.statusCode = 503;
+      throw error;
+    }
+  }
+
+  async function health() {
+    await ready();
     await pool.query('SELECT 1');
     return true;
   }
 
   async function upsertSsoUser(user) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       'INSERT INTO skill_users (id, email, display_name, image_url)',
       'VALUES ($1, $2, $3, $4)',
@@ -456,7 +490,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function createSsoLoginState(stateHash, codeVerifier, redirectUri, expiresAt) {
-    await initialized;
+    await ready();
     await pool.query('DELETE FROM skill_sso_login_states WHERE expires_at <= NOW()');
     await pool.query([
       'INSERT INTO skill_sso_login_states (state_hash, code_verifier, redirect_uri, expires_at)',
@@ -465,7 +499,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function consumeSsoLoginState(stateHash) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       'DELETE FROM skill_sso_login_states',
       'WHERE state_hash = $1 AND expires_at > NOW()',
@@ -479,7 +513,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function createSession(userId, sessionToken, expiresAt) {
-    await initialized;
+    await ready();
     await pool.query('DELETE FROM skill_sessions WHERE expires_at <= NOW()');
     await pool.query(
       'INSERT INTO skill_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
@@ -488,7 +522,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function findSession(sessionTokenHash) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       'SELECT u.id, u.email, u.display_name, u.image_url',
       'FROM skill_sessions s JOIN skill_users u ON u.id = s.user_id',
@@ -498,12 +532,12 @@ function createPgRepository(databaseUrl) {
   }
 
   async function deleteSession(sessionTokenHash) {
-    await initialized;
+    await ready();
     await pool.query('DELETE FROM skill_sessions WHERE token_hash = $1', [sessionTokenHash]);
   }
 
   async function claimLegacy(userId) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       'UPDATE skills orphan SET owner_id = $1, visibility = \'private\'',
       'WHERE orphan.owner_id IS NULL',
@@ -516,7 +550,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function listMine(userId) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       `${metadataSelect}, TRUE AS is_owner`,
       metadataJoin,
@@ -527,7 +561,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function listCommunity(userId) {
-    await initialized;
+    await ready();
     const result = await pool.query([
       `${metadataSelect}, s.owner_id = $1 AS is_owner`,
       metadataJoin,
@@ -538,7 +572,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function save(user, validated, visibility) {
-    await initialized;
+    await ready();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -622,7 +656,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function get(id, userId) {
-    await initialized;
+    await ready();
     const metadataResult = await pool.query([
       `${metadataSelect}, s.owner_id = $2 AS is_owner`,
       metadataJoin,
@@ -658,7 +692,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function updateVisibility(id, userId, visibility) {
-    await initialized;
+    await ready();
     const result = await pool.query(
       'UPDATE skills SET visibility = $3, updated_at = NOW() WHERE id = $1 AND owner_id = $2',
       [id, userId, visibility]
@@ -669,7 +703,7 @@ function createPgRepository(databaseUrl) {
   }
 
   async function remove(id, userId) {
-    await initialized;
+    await ready();
     const result = await pool.query('DELETE FROM skills WHERE id = $1 AND owner_id = $2', [id, userId]);
     return result.rowCount > 0;
   }
