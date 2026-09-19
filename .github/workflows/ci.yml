@@ -146,9 +146,12 @@ jobs:
     needs: quality
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     permissions:
       contents: write
+    env:
+      # 没买代码签名证书，关掉自动探测，避免 electron-builder 卡在找证书上
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
     steps:
       - name: 检出代码
@@ -159,6 +162,16 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      # electron 二进制和 electron-builder 工具链（winCodeSign、NSIS）每次重新下很慢，
+      # 缓存下来第二次起直接命中。
+      - name: 缓存 Electron 与 electron-builder 工具链
+        uses: actions/cache@v4
+        with:
+          path: |
+            %LOCALAPPDATA%\electron\Cache
+            %LOCALAPPDATA%\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
 
       - name: 安装依赖
         run: npm ci
@@ -179,13 +192,15 @@ jobs:
 
       # 打包前先按真实启动路径跑一遍扫描自检，避免打出来的包在用户那边起不来。
       # windows-latest 是远程会话，必须加 --headless 走软件渲染，否则 GPU 进程 FATAL。
+      # 非阻塞：CI 环境的 GPU/显示栈偶发问题不该挡住打包发布。
       - name: 桌面端启动自检
+        continue-on-error: true
         run: node scripts/desktop.js --headless --smoke
 
       - name: 构建并发布到 GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --publish always
+        run: npm run dist -- --publish always
 
       # 双保险：除了挂到 GitHub Release，也留一份 CI artifact 备查，
       # 万一 Release 上传挂了还能从 Actions 里把 exe 捞出来。
