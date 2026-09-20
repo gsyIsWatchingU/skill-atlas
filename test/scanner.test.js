@@ -310,8 +310,10 @@ test('base: localAppData 的根解析到 %LOCALAPPDATA%，而非用户主目录'
       { id: 'doubao-user', platform: 'doubao', base: 'localAppData', segments: ['Doubao', 'skills'] },
       { id: 'codex-user', platform: 'codex', segments: ['.codex', 'skills'] }
     ]);
-    assert.equal(roots[0].absolutePath, 'C:\\FakeLocalAppData\\Doubao\\skills');
-    assert.equal(roots[1].absolutePath, 'C:\\Users\\tester\\.codex\\skills');
+    // 用 path.join 拼期望值：CI 跑在 Ubuntu，path.join 产出 '/'，
+    // 断言只关心「基准取 LOCALAPPDATA 而非主目录」，不关心分隔符。
+    assert.equal(roots[0].absolutePath, path.join('C:\\FakeLocalAppData', 'Doubao', 'skills'));
+    assert.equal(roots[1].absolutePath, path.join('C:\\Users\\tester', '.codex', 'skills'));
   } finally {
     if (saved === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = saved;
