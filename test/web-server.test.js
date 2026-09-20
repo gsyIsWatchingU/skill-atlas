@@ -226,10 +226,27 @@ test('首页引导下载桌面版，并保留本地助手作为可选入口', as
   assert.match(homeHtml, /icon\.svg\?v=2\.4\.0/);
 
   // 首页主引导必须是桌面版下载，而不是"复制一条命令去跑脚本"
-  assert.match(homeHtml, /id="download-desktop"[^>]*href="\/download"/);
+  // 地址必须和服务端实际路由（/download/desktop）一致 —— 写成 /download 会 404
+  assert.match(homeHtml, /id="download-desktop"[^>]*href="\/download\/desktop"/);
   assert.match(homeHtml, /id="desktop-status" class="desktop-connection-status disconnected"[^>]*role="status"/);
   assert.doesNotMatch(homeHtml, /id="helper-command-text"/, '复制命令跑脚本的引导必须已移除');
   assert.doesNotMatch(homeHtml, /id="copy-helper-command"/, '复制命令按钮必须已移除');
+
+  // 链接指向的路由必须真的存在。
+  // 注意：不要真的去 fetch /download/desktop —— 未产出安装包时它是 404，
+  // 一旦产出就是 90 MB 的流，body 不消费会把测试进程挂住。
+  // 这里只校验首页链接与服务端路由常量指向同一个地址。
+  const serverSource = await fs.readFile(path.join(__dirname, '..', 'src', 'web-server.js'), 'utf8');
+  assert.match(
+    serverSource,
+    /url\.pathname === '\/download\/desktop'/,
+    '服务端必须提供 /download/desktop 路由'
+  );
+  assert.match(
+    serverSource,
+    /downloadPath: '\/download\/desktop'/,
+    '桌面版下载地址必须与首页链接一致'
+  );
 
   // 命令行脚本仍可下载（自动化/CI 入口）
   assert.equal((await fetch(baseUrl + '/helper/skill-packer-helper.js')).status, 200);
@@ -239,6 +256,67 @@ test('首页引导下载桌面版，并保留本地助手作为可选入口', as
   const iconSvg = await icon.text();
   assert.match(iconSvg, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
   assert.match(iconSvg, /data:image\/png;base64,[A-Za-z0-9+/=]+/);
+
+  // og:image / apple-touch-icon 引用的 PNG 也必须真的能取到，否则分享卡片是空图
+  const iconPng = await fetch(baseUrl + '/icon.png');
+  assert.equal(iconPng.status, 200);
+  assert.match(iconPng.headers.get('content-type'), /image\/png/);
+});
+
+test('三个前端入口共用同一套像素绿令牌（主题不得各自漂移）', async () => {
+  // 规范来源：skills/minimal-pixel-green-ui
+  const entries = [
+    path.join(__dirname, '..', 'src', 'web', 'styles.css'),
+    path.join(__dirname, '..', 'src', 'web', 'scan', 'scan.css'),
+    path.join(__dirname, '..', 'src', 'renderer', 'styles.css')
+  ];
+  for (const entry of entries) {
+    const css = await fs.readFile(entry, 'utf8');
+    const label = path.relative(path.join(__dirname, '..'), entry);
+    for (const [token, value] of [
+      ['--pixel-green', '#97b39b'],
+      ['--pixel-green-hover', '#e2ebe0'],
+      ['--pixel-green-strong', '#6f8f75'],
+      ['--pixel-page', '#f4f5ef'],
+      ['--pixel-surface', '#fffffc'],
+      ['--pixel-ink', '#171c18'],
+      ['--pixel-ink-secondary', '#5b665e']
+    ]) {
+      assert.match(
+        css,
+        new RegExp(`${token}:\\s*${value}`),
+        `${label} 缺少或改动了令牌 ${token}`
+      );
+    }
+    assert.match(css, /--pixel-radius:\s*0/, `${label} 圆角必须为 0`);
+    assert.match(css, /--pixel-shadow:\s*none/, `${label} 不应有阴影`);
+    assert.match(css, /Cascadia Mono/, `${label} 应使用等宽字体`);
+    assert.match(css, /prefers-reduced-motion/, `${label} 需要支持减少动效`);
+  }
+});
+
+test('图标资产齐备且被打包配置引用', async () => {
+  const root = path.join(__dirname, '..');
+  const png = await fs.readFile(path.join(root, 'assets', 'icon.png'));
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'assets/icon.png 必须是 PNG');
+
+  const svg = await fs.readFile(path.join(root, 'assets', 'icon.svg'), 'utf8');
+  assert.match(svg, /viewBox="0 0 256 256"/);
+
+  const ico = await fs.readFile(path.join(root, 'assets', 'icon.ico'));
+  assert.equal(ico.readUInt16LE(0), 0, 'ICO reserved 必须为 0');
+  assert.equal(ico.readUInt16LE(2), 1, 'ICO type 必须为 1');
+  assert.ok(ico.readUInt16LE(4) >= 4, 'ICO 至少要有 4 个尺寸');
+
+  // 渲染层用相对路径引用 icon.png，必须真的存在
+  const rendererIcon = await fs.readFile(path.join(root, 'src', 'renderer', 'icon.png'));
+  assert.equal(rendererIcon.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+
+  // 打包配置指向 build/icon.png
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.build.win.icon, 'build/icon.png');
+  const buildIcon = await fs.readFile(path.join(root, 'build', 'icon.png'));
+  assert.equal(buildIcon.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
 });
 
 test('桌面安装包接口可用，未产出时优雅降级', async (t) => {

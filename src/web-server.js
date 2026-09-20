@@ -817,9 +817,14 @@ function hashFile(filePath) {
 }
 
 async function serveStatic(response, pathname) {
-  const isBrandIcon = pathname === '/icon.svg';
-  const root = isBrandIcon ? ASSET_ROOT : WEB_ROOT;
-  const relative = pathname === '/' ? 'index.html' : isBrandIcon ? 'icon.svg' : decodeURIComponent(pathname).replace(/^\/+/, '');
+  // 品牌图标走 assets/ 而不是 web/：桌面端与网页端共用同一份图标资产
+  const brandIcon = pathname === '/icon.svg'
+    ? 'icon.svg'
+    : pathname === '/icon.png'
+      ? 'icon.png'
+      : '';
+  const root = brandIcon ? ASSET_ROOT : WEB_ROOT;
+  const relative = pathname === '/' ? 'index.html' : brandIcon || decodeURIComponent(pathname).replace(/^\/+/, '');
   const resolvedRoot = path.resolve(root);
   let resolved = path.resolve(root, relative);
   if (!resolved.startsWith(`${resolvedRoot}${path.sep}`)) {

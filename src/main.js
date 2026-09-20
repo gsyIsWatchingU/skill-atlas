@@ -30,6 +30,12 @@ const { buildPrompt, parseAdvice } = require('./ai/advice');
 const { chatComplete } = require('./ai/llm-client');
 const { resolveAdvice } = require('./ai');
 const {
+  buildUnifyPlan,
+  applyUnify,
+  rollbackUnify,
+  enrichWithFingerprints
+} = require('./unify');
+const {
   aiMissingFields,
   readSettings,
   writeSettings,
@@ -48,7 +54,8 @@ const DEFAULT_WINDOW = {
   height: 900,
   minWidth: 1080,
   minHeight: 700,
-  backgroundColor: '#0b0f14'
+  // 与页面底色（--pixel-page #f4f5ef）一致，避免首帧闪白/闪黑
+  backgroundColor: '#f4f5ef'
 };
 
 let mainWindow = null;
@@ -354,6 +361,49 @@ function registerIpc() {
     };
     await fs.writeFile(picked.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     return picked.filePath;
+  });
+
+  /* ---------------- 统一技能库（写操作，manifest 可回滚） ---------------- */
+
+  /** 统一用的扫描：只扫默认根，并给个人 Skill 补内容指纹（识别改名副本） */
+  async function runUnifyScan() {
+    const result = await scanner.scanRoots({ roots: scanner.DEFAULT_ROOTS, includeFiles: false });
+    return enrichWithFingerprints(result);
+  }
+
+  // 执行统一：移动正本进中央、各 IDE 建 junction，写 manifest；完成后刷新扫描结果
+  ipcMain.handle('unify:apply', async () => {
+    const enriched = await runUnifyScan();
+    const plan = buildUnifyPlan(enriched);
+    if (!plan.items.length) throw new Error('没有可统一的 Skill');
+    const { manifest, manifestPath } = await applyUnify(plan);
+    const settings = await readSettings(settingsPath());
+    lastScan = await runScan(settings);
+    return {
+      manifestPath,
+      summary: {
+        moved: manifest.moved.length,
+        junctioned: manifest.junctioned.length,
+        removedDuplicates: manifest.removedDuplicates.length,
+        backedUp: manifest.backedUp.length
+      }
+    };
+  });
+
+  // 回滚：只接受中央目录 .unify-backup 区内的 manifest，不接受任意路径
+  ipcMain.handle('unify:rollback', async (_event, manifestPath) => {
+    const full = path.resolve(String(manifestPath || ''));
+    const result = await scanner.scanRoots({ roots: scanner.DEFAULT_ROOTS, includeFiles: false });
+    const central = result.roots.find((root) => root.id === 'shared-agents');
+    if (!central) throw new Error('找不到中央目录');
+    if (!isInside(full, path.join(central.path, '.unify-backup'))) {
+      throw new Error('只允许回滚统一备份区内的 manifest');
+    }
+    const manifest = JSON.parse(await fs.readFile(full, 'utf8'));
+    await rollbackUnify(manifest);
+    const settings = await readSettings(settingsPath());
+    lastScan = await runScan(settings);
+    return true;
   });
 
   /* ---------------- AI 整理 ---------------- */

@@ -40,13 +40,12 @@ button:disabled { cursor: default; opacity: 0.48; }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
 .brand-mark {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   place-items: center;
   overflow: hidden;
-  padding: 3px;
   border: 2px solid var(--pixel-ink);
-  border-radius: 10px;
+  border-radius: var(--pixel-radius);
   background: #fff;
 }
 .brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }

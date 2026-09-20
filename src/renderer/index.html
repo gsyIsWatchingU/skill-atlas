@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
-  <title>Skill Packer</title>
+  <meta name="description" content="Skill Packer 桌面版：本机只读扫描 Agent Skills，按来源归类、查看被引用情况，并生成整理建议。">
+  <title>Skill Packer · Agent 工作流环境管理器</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -45,6 +46,9 @@
         <button class="nav-item" data-view="ai" type="button">
           <span>AI 整理</span>
         </button>
+        <button class="nav-item" data-view="unify" type="button">
+          <span>统一技能库</span>
+        </button>
         <button class="nav-item" data-view="cloud" type="button">
           <span>云同步</span><span class="nav-count" data-count="cloud">—</span>
         </button>
@@ -60,9 +64,9 @@
 
       <div class="sidebar-foot">
         <p class="readonly-note">
-          <strong>当前版本只读。</strong>
-          不建链接、不改 config.toml、不删除任何文件；扫描结果只留在本机内存。
-          写入与回滚在后续版本提供。
+          <strong>只读为主。</strong>
+          扫描不改任何文件；唯一的写入在「统一技能库」页（移动正本、建链接、备份副本），
+          每次执行都写 manifest，可一键回滚。
         </p>
       </div>
     </aside>
@@ -200,6 +204,28 @@
           <pre class="ai-payload" id="ai-payload-preview" hidden></pre>
           <div class="ai-groups" id="ai-candidates"></div>
           <div class="ai-groups" id="ai-advice"></div>
+        </div>
+      </section>
+
+      <section id="view-unify" class="view" hidden>
+        <div class="panel unify-panel">
+          <div class="ai-head">
+            <div>
+              <h2 class="panel-title">统一技能库</h2>
+              <p class="panel-note">
+                把所有个人 Skill 汇聚到中央目录 <code>.agents\skills</code>，Codex / WorkBuddy / 豆包
+                各自目录里保留指向中央的链接，一份物理文件、三个 IDE 同时识别。
+                执行会写 manifest，随时可一键回滚。
+              </p>
+            </div>
+          </div>
+
+          <p class="catalog-hint" id="unify-status">还没执行过统一。点「执行统一」即可。</p>
+
+          <div class="ai-steps">
+            <button id="unify-apply-btn" class="primary-button" type="button">执行统一</button>
+            <button id="unify-rollback-btn" class="ghost-button" type="button" disabled>回滚上次统一</button>
+          </div>
         </div>
       </section>
 

@@ -11,6 +11,12 @@ current
 # 本地产物与会话记忆，不入库
 .workbuddy/
 
+# 图标生成器的本地运行时（sharp 依赖，48MB，可由 build-icon.js 重建）
+.tooling/
+
+# git 元数据损坏时的备份目录（仅作事后追溯，不入库）
+.git.broken-*/
+
 # 调试期临时截图，不属于项目资产
 _incoming_image.png
 downloaded_image.png
