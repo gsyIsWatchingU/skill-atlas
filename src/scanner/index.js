@@ -4,7 +4,7 @@
  * 共享扫描内核 —— 无 Electron / 无 HTTP 依赖的纯 Node 模块。
  *
  * 存在的理由：此前仓库里有三套互相漂移的扫描实现
- *   - `src/web/helper/skill-dock-helper.js`（本地 HTTP 助手）
+ *   - `src/web/helper/skill-packer-helper.js`（本地 HTTP 助手）
  *   - `src/web/app.js`（浏览器 File System Access，物理上无法复用本模块）
  *   - `src/web/scan/scan.js`（/scan/ 零安装页，同上）
  * 现在把 Node 侧收敛成这一份，供 B 通道 CLI 与 C 通道宿主（Electron 桌面应用）共用。
@@ -27,7 +27,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 
-const SCANNER_VERSION = '1.0.0';
+const SCANNER_VERSION = '1.1.0';
 
 const MAX_SKILL_BYTES = 20 * 1024 * 1024;
 const MAX_SKILL_FILES = 1000;
@@ -45,13 +45,15 @@ const LINK_BUCKETS = ['followed', 'outsideRoot', 'broken', 'cycle', 'denied', 'n
 /**
  * 默认扫描根。
  *
- * 注意这是一份**共享**定义，与历史桌面版的六个根不同：
- * 历史版额外含 Trae 三平台（`.trae-cn/skills`、`.trae/skills`、`.traecli/skills`），
- * 但那版扫描器完全不处理符号链接。本模块保留 Trae 根以不回退能力，
- * 同时用 §11.1 的语义扫描 —— 两边的好处都要。
+ * 覆盖本机四类 Skill 来源：Codex（个人 + 插件缓存）、跨 Agent 共享、
+ * WorkBuddy、豆包（内置 + 用户自定义）。缺失的根如实报 `missing`，不臆造。
  *
- * §7「最小授权」要求删除 home 级自动扫描、只读用户点选目录：
- * 这里的根是**默认候选**，调用方（桌面应用首启、CLI）应允许用户裁剪；
+ * 路径基准分两种：
+ *   - 默认相对用户主目录（%USERPROFILE%）：segments 直接拼在 home 下。
+ *   - `base: 'localAppData'`：豆包桌面端的技能不在主目录，而在
+ *     %LOCALAPPDATA%\Doubao\... 下，单独用一个基准解析。
+ *
+ * §7「最小授权」要求这些根是**默认候选**，调用方（桌面首启、CLI）可裁剪；
  * `required: false` 表示缺失不报错。
  */
 const DEFAULT_ROOTS = [
@@ -72,36 +74,40 @@ const DEFAULT_ROOTS = [
     segments: ['.agents', 'skills']
   },
   {
+    id: 'workbuddy-user',
+    platform: 'workbuddy',
+    scope: 'user',
+    label: 'WorkBuddy 个人 Skill',
+    displayPath: '%USERPROFILE%\\.workbuddy\\skills',
+    segments: ['.workbuddy', 'skills']
+  },
+  {
+    id: 'doubao-system',
+    platform: 'doubao',
+    scope: 'system',
+    system: true,
+    label: '豆包内置 Skill',
+    base: 'localAppData',
+    displayPath: '%LOCALAPPDATA%\\Doubao\\User Data\\Default\\.doubao\\agent_mode\\workspace\\.skills',
+    segments: ['Doubao', 'User Data', 'Default', '.doubao', 'agent_mode', 'workspace', '.skills']
+  },
+  {
+    id: 'doubao-user',
+    platform: 'doubao',
+    scope: 'user',
+    label: '豆包用户 Skill',
+    base: 'localAppData',
+    displayPath: '%LOCALAPPDATA%\\Doubao\\User Data\\Default\\.doubao\\agent_mode\\workspace\\.user_skills',
+    segments: ['Doubao', 'User Data', 'Default', '.doubao', 'agent_mode', 'workspace', '.user_skills']
+  },
+  {
     id: 'codex-plugins',
     platform: 'codex',
     scope: 'plugin',
+    system: true,
     label: 'Codex 插件 Skill',
     displayPath: '%USERPROFILE%\\.codex\\plugins\\cache',
     segments: ['.codex', 'plugins', 'cache']
-  },
-  {
-    id: 'trae-cn-user',
-    platform: 'trae',
-    scope: 'user',
-    label: 'Trae CN 个人 Skill',
-    displayPath: '%USERPROFILE%\\.trae-cn\\skills',
-    segments: ['.trae-cn', 'skills']
-  },
-  {
-    id: 'trae-user',
-    platform: 'trae',
-    scope: 'user',
-    label: 'Trae 个人 Skill',
-    displayPath: '%USERPROFILE%\\.trae\\skills',
-    segments: ['.trae', 'skills']
-  },
-  {
-    id: 'trae-cli-user',
-    platform: 'trae',
-    scope: 'cli',
-    label: 'Trae CLI Skill',
-    displayPath: '%USERPROFILE%\\.traecli\\skills',
-    segments: ['.traecli', 'skills']
   }
 ];
 
@@ -378,7 +384,7 @@ async function readSkill(directoryPath, root, relativeSegments, options = {}, st
     source: root.label,
     rootId: root.id,
     scanDirectoryId: root.id,
-    ownership: root.id === 'codex-plugins' || isSystemPath(relativeSegments) ? 'system' : 'personal',
+    ownership: (root.system || root.id === 'codex-plugins' || isSystemPath(relativeSegments)) ? 'system' : 'personal',
     versionHash: computeVersionHash(collected.files),
     fileCount: collected.files.length,
     sizeBytes: collected.sizeBytes,
@@ -432,10 +438,23 @@ async function walkForSkills(directoryPath, root, relativeSegments, depth, optio
 
 /* ---------------- 对外入口 ---------------- */
 
+/**
+ * 解析根的基准目录。默认用户主目录；`base: 'localAppData'` 指向
+ * %LOCALAPPDATA%（豆包桌面端技能所在），取不到时退回主目录下的 AppData\Local。
+ */
+function resolveRootBase(base, homeDirectory) {
+  if (base === 'localAppData') {
+    return process.env.LOCALAPPDATA
+      || path.join(homeDirectory, 'AppData', 'Local');
+  }
+  return homeDirectory;
+}
+
 function resolveRoots(homeDirectory, roots = DEFAULT_ROOTS) {
   return roots.map((root) => ({
     ...root,
-    absolutePath: root.absolutePath || path.join(homeDirectory, ...(root.segments || []))
+    absolutePath: root.absolutePath
+      || path.join(resolveRootBase(root.base, homeDirectory), ...(root.segments || []))
   }));
 }
 

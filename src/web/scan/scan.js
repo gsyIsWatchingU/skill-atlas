@@ -298,8 +298,8 @@
 
   async function loadCliInfo() {
     const commandBlock = document.getElementById('command');
-    const endpoint = `${window.location.origin}/cli/skill-dock.js`;
-    commandBlock.textContent = `curl.exe -fsSLO ${endpoint}\nnode skill-dock.js scan`;
+    const endpoint = `${window.location.origin}/cli/skill-packer.js`;
+    commandBlock.textContent = `curl.exe -fsSLO ${endpoint}\nnode skill-packer.js scan`;
 
     try {
       const response = await fetch('/api/cli/info');
@@ -350,7 +350,7 @@
       loaded = true;
       const target = document.getElementById('source');
       try {
-        const response = await fetch('/cli/skill-dock.js');
+        const response = await fetch('/cli/skill-packer.js');
         if (!response.ok) throw new Error('无法读取脚本');
         target.textContent = await response.text();
       } catch (error) {

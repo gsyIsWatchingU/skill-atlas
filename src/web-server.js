@@ -18,7 +18,7 @@ const SESSION_COOKIE = 'skill_atlas_session';
 const SSO_STATE_COOKIE = 'skill_atlas_sso_state';
 const WEB_ROOT = path.join(__dirname, 'web');
 const ASSET_ROOT = path.join(__dirname, '..', 'assets');
-const CLI_SCRIPT_PATH = path.join(__dirname, '..', 'bin', 'skill-dock.js');
+const CLI_SCRIPT_PATH = path.join(__dirname, '..', 'bin', 'skill-packer.js');
 const DESKTOP_OUTPUT_DIR = path.join(__dirname, '..', 'outputs');
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -392,14 +392,28 @@ function createPgRepository(databaseUrl) {
     '  ON skill_versions(created_at DESC);'
   ];
 
+  // 数组元素是**行片段**，不是完整语句：一条 CREATE TABLE 会跨多个元素。
+  // 按「以分号结尾」切分真正的语句边界 —— 之前直接逐元素执行，把每条 CREATE TABLE
+  // 拆成了若干语法错误片段，导致 schema 全废、健康检查 503。
+  const schemaStatements = [];
+  let buffer = [];
+  for (const line of schemaSql) {
+    buffer.push(line);
+    if (line.trimEnd().endsWith(';')) {
+      schemaStatements.push(buffer.join('\n'));
+      buffer = [];
+    }
+  }
+  if (buffer.length) schemaStatements.push(buffer.join('\n'));
+
   // 逐条执行而不是整批提交：多语句一次提交时，只要一条失败或拿不到锁，
   // 整个批次会一起失败，而其中大部分语句其实是幂等且无害的。
-  // 逐条还能定位到具体是哪条语句出问题。每条都带 statement_timeout，
+  // 逐条还能定位到具体是哪条语句出问题。每条都带超时，
   // 避免 ALTER TABLE 抢不到 ACCESS EXCLUSIVE 锁时无限挂起（会让健康检查一直超时）。
   let schemaState = 'pending';
   let schemaError = null;
   const initialized = (async () => {
-    for (const statement of schemaSql) {
+    for (const statement of schemaStatements) {
       const label = statement.slice(0, 60).replace(/\s+/g, ' ');
       try {
         // 用连接级超时（不是 SET LOCAL —— 那需要显式事务才生效）：
@@ -743,11 +757,11 @@ async function describeCliScript() {
   const match = content.toString('utf8').match(/const CLI_VERSION = '([^']+)'/);
   return {
     available: true,
-    name: 'skill-dock',
+    name: 'skill-packer',
     version: match ? match[1] : 'unknown',
     sizeBytes: content.length,
     sha256: createHash('sha256').update(content).digest('hex'),
-    downloadPath: '/cli/skill-dock.js'
+    downloadPath: '/cli/skill-packer.js'
   };
 }
 
@@ -782,7 +796,7 @@ async function findDesktopInstaller(outputDir = DESKTOP_OUTPUT_DIR) {
   const latest = candidates[0];
   return {
     available: true,
-    name: 'Skill Dock',
+    name: 'Skill Packer',
     fileName: latest.name,
     filePath: latest.filePath,
     sizeBytes: latest.sizeBytes,
@@ -1159,7 +1173,7 @@ function createSkillAtlasServer(options = {}) {
         return;
       }
 
-      if (url.pathname === '/cli/skill-dock.js' && request.method === 'GET') {
+      if (url.pathname === '/cli/skill-packer.js' && request.method === 'GET') {
         let content;
         try {
           content = await fs.readFile(CLI_SCRIPT_PATH);
@@ -1169,7 +1183,7 @@ function createSkillAtlasServer(options = {}) {
         }
         response.writeHead(200, {
           'Content-Type': 'text/plain; charset=utf-8',
-          'Content-Disposition': 'inline; filename="skill-dock.js"',
+          'Content-Disposition': 'inline; filename="skill-packer.js"',
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
           'Referrer-Policy': 'no-referrer'
@@ -1236,7 +1250,7 @@ if (require.main === module) {
   server.repository.health()
     .then(() => {
       server.listen(port, host, () => {
-        console.log(`Skill Dock Web 已启动：http://${host}:${port}`);
+        console.log(`Skill Packer Web 已启动：http://${host}:${port}`);
       });
     })
     .catch((error) => {

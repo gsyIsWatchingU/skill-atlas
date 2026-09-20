@@ -45,7 +45,7 @@ test('usage 事件类型是 referenced，不是 invoked（§4 三类事件不得
 });
 
 test('scanCodexUsage 的 meta 标明这是代理指标', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-usage-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-usage-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const sessionRoot = path.join(home, 'sessions');
   await fs.mkdir(sessionRoot, { recursive: true });
@@ -75,7 +75,7 @@ test('scanCodexUsage 的 meta 标明这是代理指标', async (t) => {
 });
 
 test('不相关的工具调用不会被算成引用', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-usage-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-usage-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const sessionRoot = path.join(home, 'sessions');
   await fs.mkdir(sessionRoot, { recursive: true });

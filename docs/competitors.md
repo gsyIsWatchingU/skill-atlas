@@ -75,7 +75,7 @@ Skills 市场直连 SkillHub、"项目"里共享 Skills 与 MCP。
 
 ## 3 重叠矩阵（合并后修正）
 
-| Skill Dock 计划的能力 | 被谁覆盖 | 状态 |
+| Skill Packer 计划的能力 | 被谁覆盖 | 状态 |
 |---|---|---|
 | 发现与安装 | Vercel Skills、各 SkillHub、skills.sh | 完全饱和 |
 | 中央仓库 + 软链接 | Skills Manager、omrikais/skill-manager、thesash/skill-hub、Agent Skill Hub | **已被覆盖** |
@@ -111,19 +111,19 @@ AI 整理 + 真实使用分析"。合并后需要收窄，其中"项目级隔离
    不是"一个待安装的 Skill 名单"。
 5. **跨工具统一治理 + 渐进式本地能力入口**：单一入口覆盖"零安装快速体检 →
    命令行自动化 → 装一次后持续管理"三段，而不是让用户在一开始就二选一。
-   注意这条**不能再写成"只有我们是网页"**——2026-09-18 起 Skill Dock 自己
+   注意这条**不能再写成"只有我们是网页"**——2026-09-18 起 Skill Packer 自己
    也是桌面 GUI（C 通道载体，见 solution.md §2.1），所以差异化不在形态，
-   而在**同一个内核同时供给三种形态**：`/scan/`（零安装）、`bin/skill-dock.js`
+   而在**同一个内核同时供给三种形态**：`/scan/`（零安装）、`bin/skill-packer.js`
    （CI/自动化）、桌面版（持续治理、M2 起承担 Diff 与回滚）。
    平台原（TRAE、WorkBuddy 企业版）正在补单平台内的技能管理，
    但它们**不会跨工具**，这条路仍然是空的。
 
 ## 5 定位（采纳用户侧表述）
 
-> **Skill Dock 是面向项目的 Agent 工作流环境管理器。**
+> **Skill Packer 是面向项目的 Agent 工作流环境管理器。**
 
 不与 skills.sh、腾讯或讯飞正面竞争 Skill 数量。把它们当**上游源**，
-Skill Dock 专注：
+Skill Packer 专注：
 
 **导入 → 整理 → 组合 → 隔离 → 激活 → 分享 → 复现**
 

@@ -7,11 +7,11 @@ const {
   createHelperServer,
   scanRoots,
   summarizeLinks
-} = require('../src/web/helper/skill-dock-helper');
+} = require('../src/web/helper/skill-packer-helper');
 const { computeVersionHash } = require('../src/web-server');
 
 async function createFixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-helper-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-helper-'));
   const skillRoot = path.join(root, '.codex', 'skills', 'demo-skill');
   await fs.mkdir(path.join(skillRoot, 'scripts'), { recursive: true });
   await fs.writeFile(
@@ -141,7 +141,7 @@ async function writeSkill(directory, name, description) {
 // Skill 目录本身是链接：项目/.agents/skills/<name> -> 中央仓库里的真实目录。
 // 这是"项目环境隔离"落地后的形态，扫描器看不见它等于隔离完即失明。
 async function createLinkedFixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-links-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-links-'));
   const skillsRoot = path.join(root, '.agents', 'skills');
   const central = path.join(root, 'central', 'linked-skill');
   await fs.mkdir(skillsRoot, { recursive: true });
@@ -190,7 +190,7 @@ test('关闭跟随后链接 Skill 被记为未跟随，而不是静默消失', a
 });
 
 test('Skill 目录内的链接文件按逻辑路径计入版本哈希', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-inner-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-inner-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const skillsRoot = path.join(root, '.agents', 'skills');
   const skillRoot = path.join(skillsRoot, 'with-inner-link');
@@ -213,7 +213,7 @@ test('Skill 目录内的链接文件按逻辑路径计入版本哈希', async (t
 });
 
 test('链接成环与失效链接都不终止扫描，且各自留痕', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-cycle-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-cycle-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const skillsRoot = path.join(root, '.agents', 'skills');
   await fs.mkdir(skillsRoot, { recursive: true });
@@ -237,7 +237,7 @@ test('链接成环与失效链接都不终止扫描，且各自留痕', async (t
 });
 
 test('同一目标被两个链接发现时只计一次，避免重复计入哈希', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-dup-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-dup-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const skillsRoot = path.join(root, '.agents', 'skills');
   const central = path.join(root, 'central', 'twice');

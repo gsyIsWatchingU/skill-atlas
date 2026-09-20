@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Skill Dock 命令行入口：只读、纯本地、不联网。
+// Skill Packer 命令行入口：只读、纯本地、不联网。
 // 设计原则：默认 dry-run，先把"发现了什么、会传什么、不传什么"打给用户看，
 // 再让用户自己决定下一步。命令本身就承担解释与自证的职责。
 
@@ -13,6 +13,11 @@ const {
   DEFAULT_ROOTS,
   scanRoots
 } = require('../src/scanner');
+const {
+  buildUnifyPlan,
+  applyUnify,
+  rollbackUnify
+} = require('../src/unify');
 
 const CLI_VERSION = '0.1.0';
 
@@ -27,13 +32,13 @@ const SCRIPT_EXTENSIONS = new Set([
   '.pl', '.lua', '.sql', '.r'
 ]);
 
-const USAGE = `Skill Dock 本地扫描（只读模式）
+const USAGE = `Skill Packer 本地扫描（只读模式）
 
 用法
-  skill-dock scan [项目目录...]      扫描项目的 .agents/skills 与 .codex/skills
-  skill-dock scan                    不指定目录时，扫描 Codex 默认的用户级目录
-  skill-dock scan . --json out.json  同时把报告写成 JSON
-  skill-dock scan . --include-scripts
+  skill-packer scan [项目目录...]      扫描项目的 .agents/skills 与 .codex/skills
+  skill-packer scan                    不指定目录时，扫描 Codex 默认的用户级目录
+  skill-packer scan . --json out.json  同时把报告写成 JSON
+  skill-packer scan . --include-scripts
                                      在"将上传"预演里也计入脚本类文件
 
 参数
@@ -42,10 +47,12 @@ const USAGE = `Skill Dock 本地扫描（只读模式）
   --include-scripts  预演时把脚本类文件计入上传集合
   --no-follow-links  不跟随符号链接与 junction（回到旧行为）
   --dry-run          默认行为，显式写出不影响结果
+  --apply            unify 专用：真正执行移动与建 junction（默认只打印计划）
+  --rollback <文件>  unify 专用：按之前 apply 写出的 manifest.json 回滚
   -h, --help         显示本帮助
 
 符号链接
-  默认跟随符号链接与 Windows junction——"把 Skill 链接进项目目录"正是 Skill Dock
+  默认跟随符号链接与 Windows junction——"把 Skill 链接进项目目录"正是 Skill Packer
   做项目级隔离的方式，不跟随就等于隔离完就失明。
   跟随不等于无记录：指向扫描根目录之外的链接会在报告里逐个列出真实目标，
   失效链接、链接成环与无权限目标都会单独告警。这些内容也能在 JSON 报告的 links 字段里查到。
@@ -57,8 +64,8 @@ const USAGE = `Skill Dock 本地扫描（只读模式）
 
 从哪个目录运行
   要在本仓库里运行，先切到仓库根目录，或用绝对路径：
-    cd /d E:\\prj-gsy\\skill-atlas && node bin\\skill-dock.js scan
-    node "E:\\prj-gsy\\skill-atlas\\bin\\skill-dock.js" scan
+    cd /d E:\\prj-gsy\\skill-atlas && node bin\\skill-packer.js scan
+    node "E:\\prj-gsy\\skill-atlas\\bin\\skill-packer.js" scan
   不带目录参数时扫描 Codex 用户级默认目录；带目录参数时只扫描该项目的
   .agents/skills 与 .codex/skills。
 `;
@@ -111,6 +118,8 @@ function parseArgs(argv) {
     jsonPath: '',
     includeScripts: false,
     followLinks: true,
+    apply: false,
+    rollbackPath: '',
     help: false
   };
 
@@ -130,6 +139,17 @@ function parseArgs(argv) {
       options.followLinks = false;
       continue;
     }
+    if (arg === '--apply') {
+      options.apply = true;
+      continue;
+    }
+    if (arg === '--rollback') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--rollback 需要一个 manifest.json 路径');
+      options.rollbackPath = value;
+      index += 1;
+      continue;
+    }
     if (arg === '--root') {
       const value = argv[index + 1];
       if (!value) throw new Error('--root 需要一个目录参数');
@@ -146,7 +166,7 @@ function parseArgs(argv) {
     }
     if (arg.startsWith('-')) throw new Error(`未知参数：${arg}`);
 
-    if (!options.command && (arg === 'scan' || arg === 'help')) {
+    if (!options.command && (arg === 'scan' || arg === 'help' || arg === 'unify')) {
       options.command = arg;
       continue;
     }
@@ -319,7 +339,7 @@ function renderReport(payload) {
   const { summary, roots, warnings, options, scope } = payload;
 
   lines.push('');
-  lines.push(bold('Skill Dock 本地扫描报告') + dim(`  v${CLI_VERSION} · 只读模式 · 未联网`));
+  lines.push(bold('Skill Packer 本地扫描报告') + dim(`  v${CLI_VERSION} · 只读模式 · 未联网`));
   lines.push(dim(`生成时间 ${payload.generatedAt}`));
   lines.push(dim(`当前目录 ${payload.cwd}｜扫描范围 ${scope === 'project' ? '指定项目' : '用户级默认目录'}`));
   lines.push('');
@@ -390,11 +410,77 @@ function renderReport(payload) {
   return lines.join('\n');
 }
 
+function renderUnifyPlan(plan) {
+  const lines = [];
+  lines.push('');
+  lines.push(bold('Skill Packer 统一技能库计划') + dim('  只读预览 · 未改动任何文件'));
+  lines.push(dim(`中央目录 ${plan.centralDir}`));
+  lines.push('');
+  lines.push(bold('汇总'));
+  lines.push(`  唯一技能 ${plan.summary.names} 个`);
+  lines.push(`  移进中央 ${plan.summary.moves} 个｜已在中央 ${plan.summary.keepInCentral} 个`);
+  lines.push(`  建 junction ${plan.summary.createJunctions} 个｜原位替换为 junction ${plan.summary.replaceJunctions} 个`);
+  lines.push(`  跳过本地副本 ${plan.summary.skipLocal} 个｜同名内容不同 ${plan.summary.conflicts} 个`);
+  lines.push('');
+
+  if (plan.summary.conflicts) {
+    lines.push(bold('冲突（保留更新版本，旧版标为 superseded）'));
+    for (const item of plan.items.filter((i) => i.conflict)) {
+      lines.push(`  ! ${item.name}  (正本来自 ${item.canonical.platform})`);
+      for (const s of item.superseded) {
+        lines.push(dim(`      旧版 ${s.platform} @ ${s.sourcePath}`));
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push(bold('逐技能动作'));
+  for (const item of plan.items) {
+    const verb = item.centralAction === 'keep' ? '已在中央' : `移进中央 (来自 ${item.canonical.platform})`;
+    lines.push(`  · ${item.name}  ${dim(verb)}`);
+    for (const link of item.links) {
+      const tag = link.action === 'create-junction' ? '建链接'
+        : link.action === 'replace-with-junction' ? '原位换成链接'
+        : dim('保留本地');
+      lines.push(`      ${dim(link.platform)} → ${tag}  ${dim(link.linkPath)}`);
+    }
+  }
+  lines.push('');
+  lines.push(green('确认无误后用 --apply 真正执行；执行会写 manifest，可 --rollback 还原。'));
+  return lines.join('\n');
+}
+
+async function runUnify(options) {
+  if (options.rollbackPath) {
+    const manifest = JSON.parse(await fs.readFile(path.resolve(options.rollbackPath), 'utf8'));
+    await rollbackUnify(manifest);
+    process.stdout.write(`${green('已按 manifest 回滚：删除建的 junction，移动/备份内容已还原。')}\n`);
+    return;
+  }
+
+  const result = await scanRoots({ roots: DEFAULT_ROOTS, includeFiles: false });
+  const plan = buildUnifyPlan(result);
+
+  if (options.apply) {
+    const { manifestPath } = await applyUnify(plan);
+    process.stdout.write(`${green('统一完成。')} manifest 落在 ${dim(manifestPath)}\n`);
+    process.stdout.write(`用 ${dim('node bin/skill-packer.js unify --rollback "' + manifestPath + '"')} 可还原。\n`);
+    return;
+  }
+
+  process.stdout.write(`${renderUnifyPlan(plan)}\n`);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
   if (options.help || options.command === 'help') {
     process.stdout.write(USAGE);
+    return;
+  }
+
+  if (options.command === 'unify') {
+    await runUnify(options);
     return;
   }
 

@@ -105,7 +105,7 @@ function createHelperServer(options = {}) {
       if (request.method === 'GET' && url.pathname === '/v1/health') {
         writeJson(response, 200, {
           ok: true,
-          name: 'Skill Dock Helper',
+          name: 'Skill Packer Helper',
           version: HELPER_VERSION,
           readOnly: true
         }, origin);
@@ -171,8 +171,8 @@ function createHelperServer(options = {}) {
 
 async function loadOrCreateToken() {
   const stateRoot = process.env.LOCALAPPDATA
-    ? path.join(process.env.LOCALAPPDATA, 'SkillDockHelper')
-    : path.join(os.homedir(), '.skill-dock-helper');
+    ? path.join(process.env.LOCALAPPDATA, 'SkillPackerHelper')
+    : path.join(os.homedir(), '.skill-packer-helper');
   const tokenPath = path.join(stateRoot, 'pairing-token');
   await fs.mkdir(stateRoot, { recursive: true });
   try {
@@ -215,7 +215,7 @@ async function start() {
     process.exitCode = 1;
   });
   server.listen(port, '127.0.0.1', () => {
-    console.log(`Skill Dock 助手已启动：只读扫描，监听 127.0.0.1:${port}`);
+    console.log(`Skill Packer 助手已启动：只读扫描，监听 127.0.0.1:${port}`);
     console.log('保持此窗口开启；关闭窗口即可停止助手。');
     openPairedPage(webUrl, token);
   });

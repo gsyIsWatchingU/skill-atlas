@@ -177,7 +177,7 @@ test('公网页面提供可校验的命令行脚本与本地自测入口', async
     await repository.close();
   });
 
-  const onDisk = await fs.readFile(path.join(__dirname, '..', 'bin', 'skill-dock.js'));
+  const onDisk = await fs.readFile(path.join(__dirname, '..', 'bin', 'skill-packer.js'));
 
   const info = await fetch(baseUrl + '/api/cli/info').then((response) => response.json());
   assert.equal(info.cli.available, true);
@@ -185,13 +185,13 @@ test('公网页面提供可校验的命令行脚本与本地自测入口', async
   assert.equal(info.cli.sha256, sha256(onDisk));
   assert.match(info.cli.version, /^\d+\.\d+\.\d+$/);
 
-  const script = await fetch(baseUrl + '/cli/skill-dock.js');
+  const script = await fetch(baseUrl + '/cli/skill-packer.js');
   assert.equal(script.status, 200);
   assert.match(script.headers.get('content-type'), /text\/plain/);
   assert.equal(script.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(sha256(Buffer.from(await script.arrayBuffer())), info.cli.sha256);
 
-  const rejected = await fetch(baseUrl + '/cli/skill-dock.js', { method: 'POST' });
+  const rejected = await fetch(baseUrl + '/cli/skill-packer.js', { method: 'POST' });
   assert.ok([403, 405].includes(rejected.status), '命令行脚本不接受写入请求');
 
   const page = await fetch(baseUrl + '/scan/');
@@ -223,7 +223,7 @@ test('首页引导下载桌面版，并保留本地助手作为可选入口', as
   // 本地助手（B 通道 CLI）仍可连接回环地址
   assert.match(home.headers.get('content-security-policy'), /http:\/\/127\.0\.0\.1:18787/);
   const homeHtml = await home.text();
-  assert.match(homeHtml, /icon\.svg\?v=2\.3\.2/);
+  assert.match(homeHtml, /icon\.svg\?v=2\.4\.0/);
 
   // 首页主引导必须是桌面版下载，而不是"复制一条命令去跑脚本"
   assert.match(homeHtml, /id="download-desktop"[^>]*href="\/download"/);
@@ -232,23 +232,23 @@ test('首页引导下载桌面版，并保留本地助手作为可选入口', as
   assert.doesNotMatch(homeHtml, /id="copy-helper-command"/, '复制命令按钮必须已移除');
 
   // 命令行脚本仍可下载（自动化/CI 入口）
-  assert.equal((await fetch(baseUrl + '/helper/skill-dock-helper.js')).status, 200);
+  assert.equal((await fetch(baseUrl + '/helper/skill-packer-helper.js')).status, 200);
 
   const icon = await fetch(baseUrl + '/icon.svg');
   assert.equal(icon.status, 200);
   const iconSvg = await icon.text();
-  assert.match(iconSvg, /x="78" y="78" width="868" height="868" rx="182" fill="#fff"/);
-  assert.match(iconSvg, /translate\(225\.28 225\.28\) scale\(\.56\)/);
+  assert.match(iconSvg, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  assert.match(iconSvg, /data:image\/png;base64,[A-Za-z0-9+/=]+/);
 });
 
 test('桌面安装包接口可用，未产出时优雅降级', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-desktop-dl-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-desktop-dl-'));
   const outputDir = path.join(home, 'outputs');
   await fs.mkdir(outputDir, { recursive: true });
   // 用一个小文件冒充安装包，避免测试真的去读 90 MB
-  await fs.writeFile(path.join(outputDir, 'Skill-Dock-Setup-2.2.0.exe'), 'fake installer\n', 'utf8');
+  await fs.writeFile(path.join(outputDir, 'Skill-Packer-Setup-2.2.0.exe'), 'fake installer\n', 'utf8');
   // 非 Setup 的 portable 单文件不应被选中
-  await fs.writeFile(path.join(outputDir, 'Skill Dock 2.2.0.exe'), 'portable\n', 'utf8');
+  await fs.writeFile(path.join(outputDir, 'Skill Packer 2.2.0.exe'), 'portable\n', 'utf8');
 
   const repository = createMemoryRepository();
   const server = createSkillAtlasServer({ repository, desktopOutputDir: outputDir });
@@ -264,7 +264,7 @@ test('桌面安装包接口可用，未产出时优雅降级', async (t) => {
   assert.equal(info.status, 200);
   const payload = await info.json();
   assert.equal(payload.desktop.available, true);
-  assert.equal(payload.desktop.fileName, 'Skill-Dock-Setup-2.2.0.exe');
+  assert.equal(payload.desktop.fileName, 'Skill-Packer-Setup-2.2.0.exe');
   assert.match(payload.desktop.sha256, /^[0-9a-f]{64}$/);
 
   const download = await fetch(baseUrl + '/download/desktop');
@@ -274,7 +274,7 @@ test('桌面安装包接口可用，未产出时优雅降级', async (t) => {
 });
 
 test('桌面安装包未产出时返回 404 与 available:false', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-desktop-none-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-desktop-none-'));
   const repository = createMemoryRepository();
   const server = createSkillAtlasServer({
     repository,

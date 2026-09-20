@@ -16,4 +16,4 @@ curl -fsS "${BASE_URL}/" >/dev/null
 curl -fsS "${BASE_URL}/api/skills?scope=community" |
   "${NODE_BIN}" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(!Array.isArray(j.skills))process.exit(1)})"
 
-echo "Skill Dock 验证通过：${BASE_URL}"
+echo "Skill Packer 验证通过：${BASE_URL}"

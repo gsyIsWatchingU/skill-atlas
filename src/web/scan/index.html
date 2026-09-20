@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>本地 Skill 体检 · Skill Dock</title>
+<title>本地 Skill 体检 · Skill Packer</title>
 <link rel="stylesheet" href="./scan.css">
 </head>
 <body>
 <main class="page">
 
-  <p class="kicker">SKILL DOCK / LOCAL AUDIT</p>
+  <p class="kicker">SKILL PACKER / LOCAL AUDIT</p>
   <h1>先看它会告诉你什么，再决定要不要跑</h1>
   <p class="lede">
     下面第一份报告来自一次真实扫描，只做了路径替换。看完你会知道这个工具到底想干什么——
@@ -19,7 +19,7 @@
 
   <section class="card">
     <h2>它会打印什么</h2>
-    <pre class="report">Skill Dock 本地扫描报告  v0.1.0 · 只读模式 · 未联网
+    <pre class="report">Skill Packer 本地扫描报告  v0.1.0 · 只读模式 · 未联网
 <span class="t-dim">生成时间 2026/9/15 10:31:22</span>
 <span class="t-dim">当前目录 C:\projects\my-app｜扫描范围 用户级默认目录</span>
 
@@ -136,8 +136,8 @@
         <span class="cmd-label">Windows · cmd 或 PowerShell</span>
         <button id="copy" type="button" class="ghost small">复制</button>
       </div>
-      <pre id="command" class="code">curl.exe -fsSLO https://gsy-gpu.tail660bdf.ts.net:8443/cli/skill-dock.js
-node skill-dock.js scan</pre>
+      <pre id="command" class="code">curl.exe -fsSLO https://gsy-gpu.tail660bdf.ts.net:8443/cli/skill-packer.js
+node skill-packer.js scan</pre>
     </div>
 
     <dl class="meta" id="cli-meta">
@@ -149,8 +149,8 @@ node skill-dock.js scan</pre>
     <p class="note">
       下载后可以自己验一遍，Windows 自带工具，不需要安装任何东西：
     </p>
-    <pre class="code">certutil -hashfile skill-dock.js SHA256
-<span class="t-dim"># PowerShell: Get-FileHash .\skill-dock.js -Algorithm SHA256</span></pre>
+    <pre class="code">certutil -hashfile skill-packer.js SHA256
+<span class="t-dim"># PowerShell: Get-FileHash .\skill-packer.js -Algorithm SHA256</span></pre>
 
     <details id="source-details">
       <summary>这个脚本到底做了什么（点开看完整源码）</summary>
@@ -163,7 +163,7 @@ node skill-dock.js scan</pre>
   </section>
 
   <p class="foot">
-    <a href="/">返回 Skill Dock</a>
+    <a href="/">返回 Skill Packer</a>
   </p>
 
 </main>

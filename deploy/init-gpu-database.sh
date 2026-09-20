@@ -7,7 +7,7 @@ ENV_FILE="${STATE_ROOT}/.env"
 DB_NAME="skill_atlas"
 DB_USER="skill_atlas"
 SSO_AUTH_BASE_URL="${SSO_AUTH_BASE_URL:?请先设置统一账号中心地址}"
-PUBLIC_URL="${PUBLIC_URL:?请先设置 Skill Dock 固定公网地址}"
+PUBLIC_URL="${PUBLIC_URL:?请先设置 Skill Packer 固定公网地址}"
 
 if [[ -e "${ENV_FILE}" ]]; then
   echo "已存在 .env，拒绝覆盖。" >&2

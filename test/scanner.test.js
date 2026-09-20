@@ -57,7 +57,7 @@ async function linkDirectory(target, linkPath) {
 }
 
 test('共享内核扫描默认根并解析 frontmatter', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   await writeSkill(path.join(home, '.agents', 'skills', 'alpha'), 'alpha', '第一个技能');
   // 块标量描述：多行值应被拼成一段，而不是丢成空
@@ -79,7 +79,7 @@ test('共享内核扫描默认根并解析 frontmatter', async (t) => {
 });
 
 test('凭据类文件不入哈希，只计 skippedSensitive', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const skill = path.join(home, '.agents', 'skills', 'secretive');
   await writeSkill(skill, 'secretive', '含凭据文件');
@@ -99,7 +99,7 @@ test('凭据类文件不入哈希，只计 skippedSensitive', async (t) => {
 });
 
 test('默认跟随跳出扫描根的链接，并把它记进 outsideRoot（§11.1 约束 1+2）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const central = path.join(home, 'central-repo', 'linked');
   await writeSkill(central, 'linked-skill', '中央仓库里的技能');
@@ -125,7 +125,7 @@ test('默认跟随跳出扫描根的链接，并把它记进 outsideRoot（§11.
 });
 
 test('根内链接记 followed 而不是 outsideRoot', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const target = path.join(home, '.agents', 'skills-real', 'inner');
   await writeSkill(target, 'inner', '根内的技能');
@@ -152,7 +152,7 @@ test('根内链接记 followed 而不是 outsideRoot', async (t) => {
 });
 
 test('followLinks=false 时链接记 notFollowed，而不是静默消失', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const central = path.join(home, 'central', 'linked');
   await writeSkill(central, 'linked-skill', '不应被扫到');
@@ -172,7 +172,7 @@ test('followLinks=false 时链接记 notFollowed，而不是静默消失', async
 });
 
 test('失效链接与链接成环都不终止扫描（§11.1）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const skillsRoot = path.join(home, '.agents', 'skills');
   await writeSkill(path.join(skillsRoot, 'healthy'), 'healthy', '正常技能');
@@ -196,7 +196,7 @@ test('失效链接与链接成环都不终止扫描（§11.1）', async (t) => {
 });
 
 test('同一个链接只记一次（§11.1 约束 4）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const central = path.join(home, 'central', 'once');
   await writeSkill(central, 'once', '只应记一次');
@@ -220,7 +220,7 @@ test('同一个链接只记一次（§11.1 约束 4）', async (t) => {
 });
 
 test('版本哈希用逻辑路径：同一内容从不同链接位置被发现得到同一哈希（§11.1 约束 3）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const central = path.join(home, 'central', 'shared-skill');
   await writeSkill(central, 'shared-skill', '同一份内容');
@@ -250,7 +250,7 @@ test('版本哈希用逻辑路径：同一内容从不同链接位置被发现�
 });
 
 test('同名 Skill 不合并，只按物理目录去重（§6）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   await writeSkill(path.join(home, '.agents', 'skills', 'same-one'), 'duplicate-name', '第一个');
   await writeSkill(path.join(home, '.agents', 'skills', 'same-two'), 'duplicate-name', '第二个');
@@ -278,7 +278,7 @@ test('dedupeByDirectory 去掉同一物理目录的重复实例', () => {
 });
 
 test('includeFiles 默认关闭：扫描结果不携带文件内容', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   await writeSkill(path.join(home, '.agents', 'skills', 'lean'), 'lean', '不外传内容');
 
@@ -289,21 +289,37 @@ test('includeFiles 默认关闭：扫描结果不携带文件内容', async (t) 
 });
 
 test('缺失的扫描根报 missing，不影响其他根（§7 最小授权：不臆造 home 级扫描）', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   await writeSkill(path.join(home, '.agents', 'skills', 'only'), 'only', '唯一');
 
   const result = await scanner.scanRoots({ homeDirectory: home, roots: scanner.DEFAULT_ROOTS });
 
   const agents = result.roots.find((root) => root.id === 'shared-agents');
-  const trae = result.roots.find((root) => root.id === 'trae-user');
+  const workbuddy = result.roots.find((root) => root.id === 'workbuddy-user');
   assert.equal(agents.status, 'ready');
-  assert.equal(trae.status, 'missing');
-  assert.equal(trae.skillCount, 0);
+  assert.equal(workbuddy.status, 'missing');
+  assert.equal(workbuddy.skillCount, 0);
+});
+
+test('base: localAppData 的根解析到 %LOCALAPPDATA%，而非用户主目录', () => {
+  const saved = process.env.LOCALAPPDATA;
+  process.env.LOCALAPPDATA = 'C:\\FakeLocalAppData';
+  try {
+    const roots = scanner.resolveRoots('C:\\Users\\tester', [
+      { id: 'doubao-user', platform: 'doubao', base: 'localAppData', segments: ['Doubao', 'skills'] },
+      { id: 'codex-user', platform: 'codex', segments: ['.codex', 'skills'] }
+    ]);
+    assert.equal(roots[0].absolutePath, 'C:\\FakeLocalAppData\\Doubao\\skills');
+    assert.equal(roots[1].absolutePath, 'C:\\Users\\tester\\.codex\\skills');
+  } finally {
+    if (saved === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = saved;
+  }
 });
 
 test('扫描器是纯函数式的：两次扫描结果一致且不写磁盘', async (t) => {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-dock-core-'));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   await writeSkill(path.join(home, '.agents', 'skills', 'stable'), 'stable', '稳定');
 

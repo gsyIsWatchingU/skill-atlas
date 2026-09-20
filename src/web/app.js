@@ -2,10 +2,10 @@ const MAX_SKILL_BYTES = 20 * 1024 * 1024;
 const MAX_SKILL_FILES = 1000;
 const MAX_SCAN_DEPTH = 12;
 const SKIP_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', '__pycache__', 'dist', 'build', 'coverage']);
-const SCAN_DIRECTORY_DB = 'skill-dock-local';
+const SCAN_DIRECTORY_DB = 'skill-packer-local';
 const SCAN_DIRECTORY_STORE = 'scan-directories';
 const HELPER_BASE_URL = 'http://127.0.0.1:18787';
-const HELPER_TOKEN_STORAGE = 'skill-dock-helper-token';
+const HELPER_TOKEN_STORAGE = 'skill-packer-helper-token';
 const DEFAULT_SCAN_DIRECTORIES = [
   { id: 'codex-user', label: 'Codex 个人 Skill', path: '%USERPROFILE%\\.codex\\skills', custom: false },
   { id: 'shared-agents', label: '跨 Agent 共享 Skill', path: '%USERPROFILE%\\.agents\\skills', custom: false },
@@ -194,7 +194,7 @@ function generateZhSummary(skill) {
     : '「' + displayName + '」技能：暂无简介。';
 }
 
-const ZH_SUMMARY_STORAGE = 'skill-dock-zh-summaries';
+const ZH_SUMMARY_STORAGE = 'skill-packer-zh-summaries';
 
 function loadZhSummaries() {
   try {
@@ -420,7 +420,7 @@ function storedHelperToken() {
  * 本地助手（B 通道 CLI）的状态渲染。
  *
  * 首页不再暴露"复制命令跑脚本"的引导，但助手本身仍然可用：
- * 自动化与 CI 场景直接跑 `node bin/skill-dock.js`（或 npm run helper）即可，
+ * 自动化与 CI 场景直接跑 `node bin/skill-packer.js`（或 npm run helper）即可，
  * helper token 通过 URL hash 带过来，这里只负责显示连接态。
  */
 function renderHelper() {
@@ -560,7 +560,7 @@ function setAuthMessage(message, isError) {
 function setAuthMode(mode) {
   state.authMode = mode;
   const registering = mode === 'register';
-  elements.authTitle.textContent = registering ? '注册统一账号' : '登录 Skill Dock';
+  elements.authTitle.textContent = registering ? '注册统一账号' : '登录 Skill Packer';
   elements.authLoginTab.classList.toggle('active', !registering);
   elements.authRegisterTab.classList.toggle('active', registering);
   document.querySelectorAll('.auth-register-only').forEach(function (node) {
