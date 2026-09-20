@@ -1,17 +1,17 @@
-# Skill Dock 方案总览
+# Skill Packer 方案总览
 
 > 本文是产品重构的唯一依据。与代码冲突时以本文为准，改动本文需同步更新 `README.md`。
 
 ## 0 一句话
 
-**Skill Dock：为每个项目启用刚刚好的 Skills，并将整套 Agent 工作流一键打包分享。**
+**Skill Packer：为每个项目启用刚刚好的 Skills，并将整套 Agent 工作流一键打包分享。**
 
 它不是 Skill 仓库，而是 **Agent 环境管理器**。仓库只是底座。
 
 ### 不做的事
 
 - 不做 Skill 编辑器和 IDE。
-- 不做封闭生态：工作流包导出的产物必须能被不使用 Skill Dock 的人原生安装。
+- 不做封闭生态：工作流包导出的产物必须能被不使用 Skill Packer 的人原生安装。
 - 不替用户执行删除或合并。只给建议，最终由用户确认。
 - 不上传对话内容、不采集 Skill 的使用语境。只上传调用次数。
 
@@ -39,7 +39,7 @@
 
 因此定位改为：
 
-> **Skill Dock 是面向项目的 Agent 工作流环境管理器。**
+> **Skill Packer 是面向项目的 Agent 工作流环境管理器。**
 > 不与任何 Skill 市场正面竞争数量，把它们当上游源，专注
 > **导入 → 整理 → 组合 → 隔离 → 激活 → 分享 → 复现**。
 
@@ -101,11 +101,11 @@ Skill 内容变了，旧包仍然指向旧版本。
 装一次之后不用再下脚本、不用再开命令行、不用每次重新选文件夹。
 
 零安装入口依然保留且不弱化：`/scan/`（A 通道，浏览器直接读你点选的目录）
-与 `bin/skill-dock.js`（B 通道，面向自动化与 CI）。
+与 `bin/skill-packer.js`（B 通道，面向自动化与 CI）。
 
 ### 2.2 Node 侧只有一份扫描实现
 
-`src/scanner/index.js` 是 Node 侧**唯一**的扫描内核，B 通道 CLI（`bin/skill-dock.js`）
+`src/scanner/index.js` 是 Node 侧**唯一**的扫描内核，B 通道 CLI（`bin/skill-packer.js`）
 与 C 通道宿主（Electron 主进程）都调用它。此前 helper 里那份重复实现已删除。
 
 A 通道（`src/web/app.js` 与 `src/web/scan/scan.js`）物理上无法 require 这个模块
@@ -279,16 +279,33 @@ policy:
 
 AI 只输出建议，不执行删除或合并。
 
+#### 交给模型的数据边界（2026-09-20 落地）
+
+模型只能看到编号（`s1`、`s2`…），看不到路径；发什么是可枚举的，不是"按需抓"：
+
+| 内容 | 默认 | 额外勾选 | 理由 |
+|---|---|---|---|
+| name / description / 平台 / 作用域 / 内容哈希 / 文件数 / 体积 / 修改日期 / 被引用次数 | 发 | — | 判断重复所需的最小集合 |
+| 目录路径 | **不发** | 不发 | 带用户名与磁盘布局；描述与正文里的路径还要再脱敏一层 |
+| 文件清单、脚本内容 | **不发** | 不发 | §7 分层上传的同一条边界 |
+| SKILL.md 正文摘要 | 不发 | 发（默认 800 字） | 语义判断才需要；只发 SKILL.md 本身 |
+
+反方向同样要管：模型的输出**逐条核对**后才显示——编号必须存在、必须同属一个候选组、
+必须给出依据。对不上的整条丢弃并如实计数，不把幻觉当事实。
+
+出网条件是三重闸门：设置里的「允许发送」默认关闭 → 发送前展示将要发的载荷 → 点确认才发。
+粗筛与预览任何时候都不出网。API Key 明文存本机 settings.json，与云端会话令牌同级处理。
+
 ## 9 分享与复现
 
-工作流包的导出产物必须能被不使用 Skill Dock 的人原生安装。
+工作流包的导出产物必须能被不使用 Skill Packer 的人原生安装。
 
 | 通道 | 形式 | 适用 |
 |---|---|---|
 | Codex Plugin | `skills/` 目录 + 可选 MCP 配置与展示资源 | 正式分发 |
 | Git | `git clone` 到项目 `.agents/skills` | 谨慎用户、企业 |
 | `$skill-installer` | Codex 内置安装器 | 单个技能试用 |
-| npx | `npx skill-dock@<版本> scan` | 命令行用户、CI |
+| npx | `npx skill-packer@<版本> scan` | 命令行用户、CI |
 
 CLI 分发的三条硬要求：
 
@@ -300,10 +317,10 @@ CLI 分发的三条硬要求：
 
 | 文件 | 现状 | 处置 |
 |---|---|---|
-| `src/web-server.js` | 1049 行：PostgreSQL 仓储、SSO、skills API、静态服务 | **改造**：新增四个对象的路由；`skill_files` 按 §7 收窄；`/api/cli/info` 与 `/cli/skill-dock.js` 保留 |
+| `src/web-server.js` | 1049 行：PostgreSQL 仓储、SSO、skills API、静态服务 | **改造**：新增四个对象的路由；`skill_files` 按 §7 收窄；`/api/cli/info` 与 `/cli/skill-packer.js` 保留 |
 | `src/web/app.js` | 1473 行：单页逻辑，围绕"扫描并上传单个 Skill" | **重写**：围绕"工作流包"与"项目环境"重构，保留账号、社区、同步逻辑 |
-| `src/web/helper/skill-dock-helper.js` | 430 行：本地 HTTP 服务，`/v1/health`、`/v1/scan`，返回全量文件内容 | **改造或废弃**：安全模型不合格；若保留则收敛为 C 通道宿主，去掉扫描职责 |
-| `bin/skill-dock.js` | 427 行：只读扫描 CLI，复用 `scanRoots` | **保留并扩展**：作为 B 通道 |
+| `src/web/helper/skill-packer-helper.js` | 430 行：本地 HTTP 服务，`/v1/health`、`/v1/scan`，返回全量文件内容 | **改造或废弃**：安全模型不合格；若保留则收敛为 C 通道宿主，去掉扫描职责 |
+| `bin/skill-packer.js` | 427 行：只读扫描 CLI，复用 `scanRoots` | **保留并扩展**：作为 B 通道 |
 | `src/web/scan/*` | 只读展示页，File System Access 本地分析 | **保留**：作为 A 通道 |
 | `deploy/*` | 发布包走 `git ls-files`，Supervisor + Funnel | **保留**，补 Windows 签名打包 |
 | `test/*` | 7 项测试，含新增的公网路由测试 | **保留并扩展** |
@@ -364,7 +381,7 @@ CLI 分发的三条硬要求：
 - **C 通道只读形态：Electron 桌面应用**（`src/main.js` + `src/preload.js` + `src/renderer/`），
   `contextIsolation` + `sandbox` + 无 `nodeIntegration`，全部本机能力经白名单 IPC。
   当前只启用 read capability：不建链接、不改 `config.toml`、不删文件，扫描结果只留内存。
-- `bin/skill-dock.js`（B 通道 CLI）、`/scan/` 展示页（A 通道）、`/api/cli/info` 与 `/cli/skill-dock.js`。
+- `bin/skill-packer.js`（B 通道 CLI）、`/scan/` 展示页（A 通道）、`/api/cli/info` 与 `/cli/skill-packer.js`。
 - **共享扫描内核** `src/scanner/index.js`，CLI 与桌面宿主共用，并用 `test/scanner.test.js` 兜住 §11.1 语义。
 
 验收：CLI 在无 Node 依赖的普通机器上可跑（仅需 Node）；报告含预算、重复、描述体检；展示页零安装可用；测试覆盖。
@@ -386,7 +403,7 @@ IPC 增加 `plan:apply` / `plan:rollback`，落盘前用 Diff 窗口确认，`ap
 
 交付：包的创建与编辑、版本锁定、导出 Codex Plugin 结构、导入。
 
-验收：导出的 Plugin 能被不使用 Skill Dock 的 Codex 原生安装；Skill 内容更新后旧包仍指向旧版本。
+验收：导出的 Plugin 能被不使用 Skill Packer 的 Codex 原生安装；Skill 内容更新后旧包仍指向旧版本。
 
 ### M4 AI 整理
 
@@ -395,6 +412,11 @@ IPC 增加 `plan:apply` / `plan:rollback`，落盘前用 Diff 窗口确认，`ap
 验收：每条建议都能给出依据（哪两个 Skill、在哪个作用域、为什么）；不自动执行任何删除或合并。
 
 前置：需要 `usage_events` 有足够数据积累。
+
+**2026-09-20 进度：部分落地。** 已交付：本地候选粗筛（同名 / 同内容哈希 / 语义相似三类）、
+载荷构造与脱敏、用户自带 OpenAI 兼容端点端上直连、模型输出逐条核对、建议界面与导出。
+未做：描述体检、工作流组合建议、`usage_events` 采集——组合建议依赖共现数据，
+在 `usage_events` 落地前做出来也只是猜。
 
 ### M5 社区与复现
 

@@ -1,4 +1,4 @@
-# Skill Dock
+# Skill Packer
 
 面向项目的 Agent 工作流环境管理器：为每个项目启用刚刚好的 Skills，并把整套 Agent 工作流一键打包分享。
 
@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **桌面应用** | Electron（C 通道，只读形态） | 日常使用：装一次，之后点一下就能扫 | 安装包 |
 | **展示页 `/scan/`** | 网页 + File System Access | 先看看结果，不想装任何东西 | 不用装 |
-| **命令行 `bin/skill-dock.js`** | 单文件 Node 脚本（B 通道） | 自动化、CI、要链接清单 | 不用装（需 Node） |
+| **命令行 `bin/skill-packer.js`** | 单文件 Node 脚本（B 通道） | 自动化、CI、要链接清单 | 不用装（需 Node） |
 
 三种形态**共用同一份扫描内核** `src/scanner/index.js`（网页端因浏览器沙箱无法复用，语义由契约测试对齐）。
 
@@ -32,11 +32,11 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 把摘要打到 stdout（例如 `[smoke] {"ok":true,"skills":68,"roots":"3/6"}`），
 适合打包前后快速确认桌面端在这台机器上可用，也方便 CI 复现。
 
-安装包命名 `Skill-Dock-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
+安装包命名 `Skill-Packer-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
 
 **从 GitHub Releases 下载**：每次推到 `main`，CI 会在 Windows Runner 上自动出一份 NSIS 安装包并挂到
-[Releases](https://github.com/gsyIsWatchingU/skill-atlas/releases)，版本号形如 `2.2.0-beta.<run 号>`，
-属于 prerelease。打开 Releases 页选最新一条，下载 `Skill-Dock-Setup-*.exe` 即可。
+[Releases](https://github.com/gsyIsWatchingU/skill-packer/releases)，版本号形如 `2.2.0-beta.<run 号>`，
+属于 prerelease。打开 Releases 页选最新一条，下载 `Skill-Packer-Setup-*.exe` 即可。
 
 **启动必须经 `npm run desktop`，不要直接 `electron .`。** 启动器
 `scripts/desktop.js` 抹平两个会让"应用起不来"看起来像代码 bug 的环境坑：
@@ -54,11 +54,27 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 **当前版本只读。** 界面里明确写着这句话：不建链接、不改 `config.toml`、不删除任何文件，
 扫描结果只留在本机内存。写入与回滚（Diff 预览 + 一键回滚）在 M2 提供。
 
-六个默认扫描根：Codex 个人 Skill、跨 Agent 共享 Skill、Codex 插件缓存，
-以及 Trae 三平台（`.trae-cn` / `.trae` / `.traecli`）。缺失的根如实报 `missing`，不臆造。
+六个默认扫描根：Codex 个人 Skill 与插件缓存、跨 Agent 共享 Skill、
+WorkBuddy 个人 Skill，以及豆包的内置 Skill 与用户自定义 Skill（豆包在 `%LOCALAPPDATA%` 下）。
+缺失的根如实报 `missing`，不臆造。
 
 安全基线：`contextIsolation` + `sandbox` + 无 `nodeIntegration`，
-本机能力只经 preload 白名单 IPC 暴露；不启本地 HTTP 服务，不联网上传。
+本机能力只经 preload 白名单 IPC 暴露；不启本地 HTTP 服务。
+除「云同步」与「AI 整理」这两个用户显式开启的动作外，不联网上传任何内容。
+
+### AI 整理（默认关闭）
+
+桌面端「AI 整理」页做三件事：本地粗筛疑似重复的候选 → 把**最小元数据**交给大模型 →
+拿回「该留哪一份」的建议。模型只输出建议，不碰你的文件。
+
+- **粗筛不出网**：同名、内容哈希相同、描述高度重合三类候选全在本机算完（Jaccard 相似度，阈值 0.6）。
+- **发什么可枚举**：名称、描述、平台、作用域、内容哈希、文件数、体积、修改日期、被引用次数。
+  **不发**目录路径（带用户名）、不发脚本内容；SKILL.md 正文摘要要额外勾选才发。
+  模型只看到 `s1` / `s2` 这样的编号。
+- **三步闸门**：设置里「允许发送」默认关闭 → 发送前展开完整载荷让你看 → 点确认才发。
+- **模型会编造，所以逐条核对**：编号不存在、跨组比较、没给依据的建议整条丢弃，界面如实显示忽略了几条。
+- **端点自己填**：OpenAI 兼容地址 + 模型名（DeepSeek / Moonshot / 本地 vLLM / Ollama 均可），
+  API Key 明文存本机 `settings.json`，与云端会话令牌同级处理，不进 Git。
 
 ### 公网展示页 `/scan/`
 
@@ -73,7 +89,7 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 
 配套的服务端接口：
 
-- `GET /cli/skill-dock.js`：以 `text/plain` 单文件形式发布命令行脚本，`no-store`，附 `nosniff`。
+- `GET /cli/skill-packer.js`：以 `text/plain` 单文件形式发布命令行脚本，`no-store`，附 `nosniff`。
 - `GET /api/cli/info`：返回版本、体积与 SHA-256，版本号从脚本自身读取，避免两处维护。
 - `GET /download/desktop`：流式回传最新桌面安装包（从 `outputs/` 取 mtime 最新且含 `Setup` 的 `.exe`）。
 - `GET /api/desktop/info`：返回安装包文件名、体积与 SHA-256（流式计算，不整份读进内存）。
@@ -84,10 +100,10 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 
 ~~~powershell
 npm run scan                                   # 扫描六个默认用户级目录
-node bin/skill-dock.js scan .                  # 只扫描指定项目的 .agents/skills 与 .codex/skills
-node bin/skill-dock.js scan . --json out.json  # 同时输出机器可读报告
-node bin/skill-dock.js scan . --include-scripts
-node bin/skill-dock.js scan . --no-follow-links  # 不跟随符号链接与 junction
+node bin/skill-packer.js scan .                  # 只扫描指定项目的 .agents/skills 与 .codex/skills
+node bin/skill-packer.js scan . --json out.json  # 同时输出机器可读报告
+node bin/skill-packer.js scan . --include-scripts
+node bin/skill-packer.js scan . --no-follow-links  # 不跟随符号链接与 junction
 ~~~
 
 报告包含五类信息：
@@ -95,7 +111,7 @@ node bin/skill-dock.js scan . --no-follow-links  # 不跟随符号链接与 junc
 - **扫描根状态**：每个目录是否存在、发现多少个 Skill、跟随了多少个链接。
 - **上传预演**：默认只把 `.md` 一类文档文件计入"将来可上传"的集合，`scripts/` 下的可执行代码默认排除，并分别给出文件数与体积。
 - **初始列表预算**：累计名称与描述字符数，和 Codex 初始技能列表的 8000 字符上限对比。超过后 Codex 会先缩短描述，再多则省略部分 Skill。
-- **链接记录**：默认跟随符号链接与 junction——"把 Skill 链接进项目目录"是 Skill Dock 做项目级隔离的方式。
+- **链接记录**：默认跟随符号链接与 junction——"把 Skill 链接进项目目录"是 Skill Packer 做项目级隔离的方式。
   指向扫描根目录之外的目标会逐个列出真实路径；失效链接、链接成环与无权限目标各自告警。
   同一链接在一次扫描里只计一次。完整清单见 JSON 报告的 `links` 字段。
 - **需要注意**：同名 Skill（Codex 不合并同名项）、缺少 description、描述过长、含脚本文件。
@@ -107,7 +123,7 @@ node bin/skill-dock.js scan . --no-follow-links  # 不跟随符号链接与 junc
 **口径是 `referenced`，不是 `invoked`。** 对全部 475 个真实会话日志抽样后确认：
 Codex 不把"技能被调用"记成工具调用，日志里引用 `SKILL.md` 的调用几乎全是 agent 在读/写
 `SKILL.md` 文件本身。所以这是弱代理指标，界面上如实标注为"被引用"，不能当使用频率看。
-真正可靠的 invoked 数据要等 Codex 侧显式上报，或 M2 落盘后由 Skill Dock 自己记录启用历史。
+真正可靠的 invoked 数据要等 Codex 侧显式上报，或 M2 落盘后由 Skill Packer 自己记录启用历史。
 
 浏览器侧的两条扫描路径（首页授权目录、`/scan/` 展示页）走 File System Access API，
 该 API 看不到链接，因此**浏览器化简的结果可能与本机命令行不一致**。需要链接信息时用桌面版或命令行。
@@ -120,7 +136,7 @@ Codex 不把"技能被调用"记成工具调用，日志里引用 `SKILL.md` 的
 ~~~text
 Algorithm Lab 统一账号 API（保留 SSO + PKCE 兼容）
       ↓
-桌面应用（C 通道·只读） / 浏览器目录授权（A 通道） / CLI（B 通道） → Skill Dock Web
+桌面应用（C 通道·只读） / 浏览器目录授权（A 通道） / CLI（B 通道） → Skill Packer Web
       ↓
 GPU PostgreSQL
 skill_users → skills → skill_versions → skill_files(BYTEA)
@@ -145,7 +161,7 @@ npm run dev
 
 访问 **http://127.0.0.1:8787**。
 
-本地助手（B 通道 CLI）默认连接公网 Skill Dock；启动后会自动打开已配对页面。
+本地助手（B 通道 CLI）默认连接公网 Skill Packer；启动后会自动打开已配对页面。
 这条路径面向自动化与 CI，**首页不再引导普通用户走它**：
 
 ~~~powershell
@@ -174,7 +190,7 @@ bash deploy/start.sh
 正式运行由 Supervisor 管理应用，Tailscale Funnel 提供固定 HTTPS 地址：
 
 - 账号中心：`https://gsy-gpu.tail660bdf.ts.net`
-- Skill Dock：`https://gsy-gpu.tail660bdf.ts.net:8443`
+- Skill Packer：`https://gsy-gpu.tail660bdf.ts.net:8443`
 
 `tailscaled` 的状态目录位于 `/workspace/.tailscale`，由服务器主 Supervisor 配置统一守护。
 
@@ -189,7 +205,7 @@ bash deploy/start.sh
 
 1. **构建并发布桌面安装包**：在 `windows-latest` 上跑 `npm ci` + `electron-builder --win nsis`，
    版本号自动挂上 CI run 号（如 `2.2.0-beta.42`），产物挂到
-   [Releases](https://github.com/gsyIsWatchingU/skill-atlas/releases)。
+   [Releases](https://github.com/gsyIsWatchingU/skill-packer/releases)。
 2. **部署 Web 到 GPU**：在公共 Runner 上测试并生成发布包，再由标签为 `skill-atlas-gpu` 的 GPU 自托管
    Runner 下载发布包并完成：
 
@@ -220,10 +236,10 @@ node --check src/usage-scanner.js
 node --check src/scanner/index.js
 node --check src/web-server.js
 node --check src/web/app.js
-node --check src/web/helper/skill-dock-helper.js
+node --check src/web/helper/skill-packer-helper.js
 node --check src/web/scan/scan.js
 node --check src/renderer/app.js
-node --check bin/skill-dock.js
+node --check bin/skill-packer.js
 ~~~
 
 ~~~bash

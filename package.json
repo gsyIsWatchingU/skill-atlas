@@ -1,24 +1,24 @@
 {
-  "name": "skill-atlas",
+  "name": "skill-packer",
   "version": "2.2.0",
   "description": "面向项目的 Agent 工作流环境管理器：本地只读扫描、项目级隔离与工作流包分享",
   "private": true,
   "license": "MIT",
   "main": "src/main.js",
   "bin": {
-    "skill-dock": "bin/skill-dock.js"
+    "skill-packer": "bin/skill-packer.js"
   },
   "scripts": {
     "start": "node src/web-server.js",
     "dev": "node --watch src/web-server.js",
-    "helper": "node src/web/helper/skill-dock-helper.js",
-    "scan": "node bin/skill-dock.js scan",
+    "helper": "node src/web/helper/skill-packer-helper.js",
+    "scan": "node bin/skill-packer.js scan",
     "desktop": "node scripts/desktop.js",
     "desktop:headless": "node scripts/desktop.js --headless",
     "desktop:smoke": "node scripts/desktop.js --smoke",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
-    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js"
+    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js test/unify.test.js test/ai-advisor.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -31,8 +31,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "cn.gsy.skilldock",
-    "productName": "Skill Dock",
+    "appId": "cn.gsy.skillpacker",
+    "productName": "Skill Packer",
     "copyright": "MIT Licensed",
     "files": [
       "src/main.js",
@@ -40,6 +40,7 @@
       "src/cloud-client.js",
       "src/settings.js",
       "src/usage-scanner.js",
+      "src/ai/**/*",
       "src/scanner/**/*",
       "src/renderer/**/*",
       "package.json"
@@ -56,20 +57,21 @@
           ]
         }
       ],
-      "artifactName": "Skill-Dock-Setup-${version}.${ext}"
+      "icon": "build/icon.png",
+      "artifactName": "Skill-Packer-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Skill Dock"
+      "shortcutName": "Skill Packer"
     },
     "publish": [
       {
         "provider": "github",
         "owner": "gsyIsWatchingU",
-        "repo": "skill-atlas"
+        "repo": "skill-packer"
       }
     ]
   }

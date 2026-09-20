@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
-  <title>Skill Dock</title>
+  <title>Skill Packer</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark">SD</span>
+        <img class="brand-mark" src="icon.png" alt="Skill Packer">
         <div class="brand-text">
-          <strong>Skill Dock</strong>
+          <strong>Skill Packer</strong>
           <span id="app-version" class="brand-version">v—</span>
         </div>
       </div>
@@ -27,8 +27,11 @@
         <button class="nav-item" data-view="catalog" data-scope="codex" type="button">
           <span>Codex</span><span class="nav-count" data-count="codex">0</span>
         </button>
-        <button class="nav-item" data-view="catalog" data-scope="trae" type="button">
-          <span>Trae</span><span class="nav-count" data-count="trae">0</span>
+        <button class="nav-item" data-view="catalog" data-scope="doubao" type="button">
+          <span>豆包</span><span class="nav-count" data-count="doubao">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="workbuddy" type="button">
+          <span>WorkBuddy</span><span class="nav-count" data-count="workbuddy">0</span>
         </button>
         <button class="nav-item" data-view="catalog" data-scope="shared" type="button">
           <span>共享目录</span><span class="nav-count" data-count="shared">0</span>
@@ -38,6 +41,12 @@
         </button>
         <button class="nav-item" data-view="catalog" data-scope="unused" type="button">
           <span>从未调用</span><span class="nav-count" data-count="unused">0</span>
+        </button>
+        <button class="nav-item" data-view="ai" type="button">
+          <span>AI 整理</span>
+        </button>
+        <button class="nav-item" data-view="cloud" type="button">
+          <span>云同步</span><span class="nav-count" data-count="cloud">—</span>
         </button>
       </nav>
 
@@ -65,6 +74,7 @@
         </div>
         <div class="topbar-actions">
           <button id="export-inventory" class="ghost-button" type="button">导出清单</button>
+          <button id="translate-all" class="ghost-button" type="button" title="为所有还没有中文简介的 Skill 自动翻译一份中文简介">一键转中文</button>
           <button id="reload-ui" class="ghost-button" type="button">重新加载界面</button>
           <button id="rescan" class="primary-button" type="button">重新扫描</button>
         </div>
@@ -140,6 +150,82 @@
           <ul class="unused-list" id="unused-list"></ul>
         </div>
       </section>
+      <section id="view-ai" class="view" hidden>
+        <div class="panel ai-panel">
+          <div class="ai-head">
+            <div>
+              <h2 class="panel-title">AI 整理</h2>
+              <p class="panel-note">
+                本机先粗筛出疑似重复的候选，再由模型判断该留哪一份。
+                <strong>模型只输出建议，不会动你的文件。</strong>
+              </p>
+            </div>
+            <label class="ai-toggle">
+              <input id="ai-enabled" type="checkbox">
+              <span>允许把 Skill 数据发给大模型</span>
+            </label>
+          </div>
+
+          <div class="ai-config">
+            <label class="field">
+              <span>接口地址</span>
+              <input id="ai-base-url" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>模型名</span>
+              <input id="ai-model" placeholder="deepseek-chat" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>API Key</span>
+              <input id="ai-api-key" type="password" placeholder="本地模型可留空" autocomplete="off">
+            </label>
+            <label class="ai-check">
+              <input id="ai-include-body" type="checkbox">
+              <span>附带 SKILL.md 正文摘要（默认不发，路径与脚本内容任何时候都不发）</span>
+            </label>
+            <div class="ai-config-foot">
+              <span class="ai-key-note" id="ai-key-note">API Key 明文保存在本机设置文件里，不进 Git、不上传</span>
+              <button id="ai-save-config" class="primary-button" type="button">保存配置</button>
+            </div>
+          </div>
+
+          <div class="ai-steps">
+            <button id="ai-candidates-btn" class="ghost-button" type="button">1 · 本地粗筛（不出网）</button>
+            <button id="ai-preview-btn" class="ghost-button" type="button">2 · 预览将要发送的内容</button>
+            <button id="ai-advise-btn" class="primary-button" type="button">3 · 生成整理建议（会出网）</button>
+            <button id="ai-export-btn" class="ghost-button" type="button">导出建议</button>
+          </div>
+
+          <p class="catalog-hint" id="ai-hint">还没有开始。先做本地粗筛，全过程不出网。</p>
+          <pre class="ai-payload" id="ai-payload-preview" hidden></pre>
+          <div class="ai-groups" id="ai-candidates"></div>
+          <div class="ai-groups" id="ai-advice"></div>
+        </div>
+      </section>
+
+      <section id="view-cloud" class="view" hidden>
+        <div class="panel cloud-panel">
+          <div class="cloud-account" id="cloud-account">
+            <span id="cloud-user-label" class="cloud-user">未登录</span>
+            <button id="cloud-logout" class="ghost-button" type="button" hidden>退出登录</button>
+          </div>
+
+          <form id="cloud-login-form" class="cloud-login" hidden>
+            <input id="cloud-email" type="email" placeholder="邮箱" autocomplete="username">
+            <input id="cloud-password" type="password" placeholder="密码" autocomplete="current-password">
+            <button id="cloud-login" class="primary-button" type="submit">登录</button>
+          </form>
+
+          <div class="cloud-tabs">
+            <button id="cloud-tab-mine" class="ghost-button is-active" type="button">我的 Skill</button>
+            <button id="cloud-tab-community" class="ghost-button" type="button">Skill 社区</button>
+            <button id="cloud-refresh" class="ghost-button" type="button">刷新</button>
+          </div>
+          <p class="catalog-hint" id="cloud-hint">登录后查看云端。</p>
+          <div class="skill-grid" id="cloud-grid"></div>
+          <p class="empty" id="cloud-empty" hidden>这里还没有 Skill。在本机点开某个 Skill，选「上传到云端」。</p>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -161,6 +247,8 @@
         <h3>简介</h3>
         <p id="detail-description" class="detail-text">—</p>
         <p class="detail-meta" id="detail-description-source"></p>
+        <p id="detail-description-zh" class="detail-zh" hidden></p>
+        <p class="detail-meta" id="detail-description-zh-source" hidden></p>
       </section>
 
       <section class="detail-block">
@@ -190,7 +278,10 @@
           <button id="open-skill" type="button">打开 SKILL.md</button>
           <button id="reveal-skill" type="button">在资源管理器中显示</button>
           <button id="copy-path" type="button">复制目录路径</button>
-          <button id="edit-description" type="button">编辑中文简介</button>
+          <button id="edit-description" type="button">编辑自定义简介</button>
+          <button id="translate-one" type="button">翻译成中文</button>
+          <button id="edit-description-zh" type="button">编辑中文简介</button>
+          <button id="upload-cloud" type="button">上传到云端</button>
         </div>
       </section>
     </div>
@@ -198,8 +289,8 @@
 
   <dialog id="description-dialog" class="dialog">
     <form method="dialog">
-      <h2>编辑中文简介</h2>
-      <p class="dialog-note">只保存在本机设置里，不会写回 SKILL.md，也不会覆盖原文件。</p>
+      <h2>编辑自定义简介</h2>
+      <p class="dialog-note">只保存在本机设置里，不会写回 SKILL.md，也不会覆盖原文件。保存后会自动把它译成中文。</p>
       <textarea id="description-input" maxlength="300" rows="4" placeholder="给这个 Skill 写一句自己看得懂的说明"></textarea>
       <div class="dialog-foot">
         <span id="description-count" class="counter">0 / 300</span>
@@ -207,6 +298,22 @@
           <button id="clear-description" class="ghost-button" type="button">清空</button>
           <button id="cancel-description" class="ghost-button" type="button">取消</button>
           <button id="save-description" class="primary-button" type="button">保存</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="description-zh-dialog" class="dialog">
+    <form method="dialog">
+      <h2>编辑中文简介</h2>
+      <p class="dialog-note">中文简介会优先展示在卡片和详情页上。只保存在本机设置里，不影响 SKILL.md。</p>
+      <textarea id="description-zh-input" maxlength="300" rows="4" placeholder="用中文写一句这个 Skill 是干什么的"></textarea>
+      <div class="dialog-foot">
+        <span id="description-zh-count" class="counter">0 / 300</span>
+        <div class="dialog-buttons">
+          <button id="clear-description-zh" class="ghost-button" type="button">清空</button>
+          <button id="cancel-description-zh" class="ghost-button" type="button">取消</button>
+          <button id="save-description-zh" class="primary-button" type="button">保存</button>
         </div>
       </div>
     </form>

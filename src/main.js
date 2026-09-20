@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Skill Dock 桌面应用 · 主进程
+ * Skill Packer 桌面应用 · 主进程
  *
  * 通道归属（docs/solution.md §2，2026-09-18 修订）：
  *   本应用是 **C 通道（本地可信宿主）的主载体**，不是新通道。
@@ -18,14 +18,26 @@
 
 const { app, BrowserWindow, ipcMain, clipboard, shell, dialog } = require('electron');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 
 const scanner = require('./scanner');
+const cloud = require('./cloud-client');
+const translator = require('./translator');
+const { findDuplicateCandidates } = require('./ai/candidates');
+const { buildPayload, describePayload } = require('./ai/payload');
+const { buildPrompt, parseAdvice } = require('./ai/advice');
+const { chatComplete } = require('./ai/llm-client');
+const { resolveAdvice } = require('./ai');
 const {
+  aiMissingFields,
   readSettings,
   writeSettings,
   normalizeSettings,
-  attachCustomDescriptions
+  attachCustomDescriptions,
+  updateAiConfig,
+  updateCustomDescriptionZh,
+  withMaskedAiConfig
 } = require('./settings');
 
 // 历史桌面版用过的做法：扫描结果实时反映磁盘，不做浏览器式缓存
@@ -87,7 +99,8 @@ function createWindow() {
     ...DEFAULT_WINDOW,
     show: false,
     autoHideMenuBar: true,
-    title: 'Skill Dock',
+    title: 'Skill Packer',
+    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       // 安全基线：渲染进程拿不到 Node，能力只能通过白名单 IPC 暴露
@@ -123,6 +136,54 @@ function assertScannedPath(target) {
   if (!lastScan.skills.some((skill) => isInside(target, skill.directoryPath))) {
     throw new Error('只允许操作本次扫描发现的 Skill 文件');
   }
+}
+
+/* ---------------- AI 整理（数据出网的唯一出口） ---------------- */
+
+/** 读 SKILL.md 正文供「附带正文摘要」使用。
+ * 只读 SKILL.md 本身，不读 scripts/，也不读凭据类文件（§7 分层上传的同一条边界）；
+ * frontmatter 已在元数据字段里，这里剥掉，避免同一份信息付两次 token。
+ */
+async function readSkillBody(skill) {
+  assertScannedPath(skill.directoryPath);
+  let content;
+  try {
+    content = await fs.readFile(path.join(skill.directoryPath, 'SKILL.md'), 'utf8');
+  } catch {
+    return '';
+  }
+  return content.replace(/^\uFEFF/, '').replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$)/, '').trim();
+}
+
+/** 正文要异步读，而 payload 构造是同步的 —— 先把候选涉及到的正文全部读进内存 */
+async function collectBodies(groups) {
+  const bodies = new Map();
+  for (const group of groups) {
+    for (const skill of group.members) {
+      if (bodies.has(skill)) continue;
+      bodies.set(skill, await readSkillBody(skill));
+    }
+  }
+  return bodies;
+}
+
+/** 扫描结果 + 候选粗筛 + 载荷，三个入口共用的一段准备逻辑 */
+async function prepareAiContext(options = {}) {
+  if (!lastScan) throw new Error('尚未完成扫描，请先扫描');
+  const settings = await readSettings(settingsPath());
+  const config = settings.ai || {};
+  const { groups, stats } = findDuplicateCandidates(lastScan.skills);
+  const includeBody = typeof options.includeBody === 'boolean'
+    ? options.includeBody
+    : config.includeBody === true;
+  const bodies = includeBody ? await collectBodies(groups) : new Map();
+  const { payload, skills } = buildPayload(groups, {
+    includeBody,
+    maxBodyChars: config.maxBodyChars,
+    homeDirectory: os.homedir(),
+    bodyProvider: includeBody ? (skill) => bodies.get(skill) || '' : null
+  });
+  return { settings, config, groups, stats, payload, skills, includeBody };
 }
 
 /* ---------------- IPC ---------------- */
@@ -209,12 +270,67 @@ function registerIpc() {
     return true;
   });
 
+  // 手动设置 / 清空某个 Skill 的中文简介
+  ipcMain.handle('skills:descriptionZh:set', async (_event, payload) => {
+    const id = String((payload && payload.id) || '');
+    const descriptionZh = String((payload && payload.descriptionZh) || '').slice(0, 300);
+    if (!id) throw new Error('缺少 Skill 标识');
+    const settings = await readSettings(settingsPath());
+    const { settings: updated } = updateCustomDescriptionZh(settings, id, descriptionZh);
+    await writeSettings(settingsPath(), updated);
+    return true;
+  });
+
+  // 翻译单个 Skill：源文本取当前 displayDescription（中文简介 > 自定义简介 > 原始）
+  ipcMain.handle('skills:descriptionZh:translate-one', async (_event, payload) => {
+    const id = String((payload && payload.id) || '');
+    if (!id) throw new Error('缺少 Skill 标识');
+    const skill = lastScan && lastScan.skills.find((s) => s.id === id);
+    if (!skill) throw new Error('未找到该 Skill，请先扫描');
+    const source = skill.displayDescription || skill.customDescription || skill.description || '';
+    const zh = await translator.translateOne(source);
+    const settings = await readSettings(settingsPath());
+    const { settings: updated } = updateCustomDescriptionZh(settings, id, zh);
+    await writeSettings(settingsPath(), updated);
+    return { descriptionZh: zh };
+  });
+
+  // 一键转中文：批量翻译所有还没有中文简介的 Skill。
+  // 每次翻译完一个就落盘一次，避免中途失败丢进度。
+  ipcMain.handle('skills:descriptionZh:translate-all', async () => {
+    if (!lastScan) throw new Error('尚未完成扫描');
+    const settings = await readSettings(settingsPath());
+    const missing = lastScan.skills.filter((skill) => {
+      const zh = (settings.customDescriptionsZh || {})[skill.id];
+      return !zh;
+    });
+    const sources = missing.map((skill) => skill.displayDescription || skill.customDescription || skill.description || '');
+    const { ok, failed } = await translator.translateBatch(sources, { concurrency: 5 });
+
+    let current = await readSettings(settingsPath());
+    let saved = 0;
+    for (const [indexStr, zh] of Object.entries(ok)) {
+      const skill = missing[Number(indexStr)];
+      if (!skill) continue;
+      const applied = updateCustomDescriptionZh(current, skill.id, zh);
+      current = applied.settings;
+      saved += 1;
+    }
+    await writeSettings(settingsPath(), current);
+    return {
+      total: missing.length,
+      saved,
+      failed: Object.keys(failed).length,
+      errors: failed
+    };
+  });
+
   // 导出清单：只导出元数据，不含脚本内容（§7 分层上传）
   ipcMain.handle('skills:export', async () => {
     if (!lastScan || !mainWindow) return null;
     const picked = await dialog.showSaveDialog(mainWindow, {
       title: '导出 Skill 清单',
-      defaultPath: 'skill-dock-inventory.json',
+      defaultPath: 'skill-packer-inventory.json',
       filters: [{ name: 'JSON', extensions: ['json'] }]
     });
     if (picked.canceled || !picked.filePath) return null;
@@ -239,11 +355,196 @@ function registerIpc() {
     await fs.writeFile(picked.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     return picked.filePath;
   });
+
+  /* ---------------- AI 整理 ---------------- */
+
+  ipcMain.handle('ai:config:read', async () => {
+    const settings = await readSettings(settingsPath());
+    return withMaskedAiConfig(settings);
+  });
+
+  ipcMain.handle('ai:config:set', async (_event, patch) => {
+    const settings = await readSettings(settingsPath());
+    const { settings: updated } = updateAiConfig(settings, patch || {});
+    await writeSettings(settingsPath(), updated);
+    return withMaskedAiConfig(updated);
+  });
+
+  // 本地粗筛：不出网、不花钱，任何时候都能看
+  ipcMain.handle('ai:candidates', async () => {
+    const { groups, stats } = await prepareAiContext();
+    return {
+      stats,
+      groups: groups.map((group) => ({
+        id: group.id,
+        reason: group.reason,
+        score: group.score,
+        members: group.members.map(publicSkillFields)
+      }))
+    };
+  });
+
+  // 发送前的可见化：把「即将发出去什么」摊开给用户看，这一步不出网
+  ipcMain.handle('ai:preview', async (_event, options) => {
+    const { payload, stats, config, includeBody } = await prepareAiContext(options);
+    if (!payload.groups.length) return { empty: true, stats, preview: null, payload: null };
+    return {
+      empty: false,
+      stats,
+      preview: describePayload(payload, { ...config, includeBody }),
+      payload
+    };
+  });
+
+  // 唯一的出网点：配置没开齐就不发，宁可报错也不偷偷请求
+  ipcMain.handle('ai:advise', async (_event, options) => {
+    const { payload, skills, config, stats, groups } = await prepareAiContext(options);
+    if (config.enabled !== true) {
+      throw new Error('还没开启「允许发送」。开启后才会有网络请求。');
+    }
+    const missing = aiMissingFields(config);
+    if (missing.length) throw new Error(`还缺：${missing.join('、')}`);
+    if (!payload.groups.length) return { empty: true, stats };
+
+    const groupRefs = new Map(payload.groups.map((group) => [group.id, group.refs]));
+    const validRefs = new Set(payload.skills.map((entry) => entry.ref));
+
+    const { system, user } = buildPrompt(payload);
+    const completion = await chatComplete({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ]
+    });
+
+    const parsed = parseAdvice(completion.text, { validRefs, groupRefs });
+    const resolved = resolveAdvice(parsed, { skills, groups });
+
+    return {
+      empty: false,
+      stats,
+      model: completion.model,
+      endpoint: completion.endpoint,
+      usage: completion.usage,
+      rawLength: completion.text.length,
+      summary: resolved.summary,
+      ok: resolved.ok,
+      error: resolved.error || '',
+      rejected: resolved.rejected,
+      missingGroups: resolved.missingGroups || [],
+      groups: resolved.groups
+    };
+  });
+
+  // 导出建议：只写用户自己选的路径，不自动落到任何项目目录
+  ipcMain.handle('ai:export', async (_event, payload) => {
+    if (!mainWindow) return null;
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: '导出 AI 整理建议',
+      defaultPath: 'skill-packer-advice.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (picked.canceled || !picked.filePath) return null;
+    await fs.writeFile(picked.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    return picked.filePath;
+  });
+
+  /* ---------------- 云同步（直连 GPU API） ---------------- */
+
+  ipcMain.handle('cloud:login', async (_event, credentials) => {
+    const auth = await cloud.login({
+      email: String((credentials && credentials.email) || '').trim(),
+      password: String((credentials && credentials.password) || '')
+    });
+    return { user: auth.user };
+  });
+
+  ipcMain.handle('cloud:logout', async () => {
+    await cloud.logout();
+    return true;
+  });
+
+  ipcMain.handle('cloud:me', async () => {
+    return cloud.currentUser();
+  });
+
+  ipcMain.handle('cloud:list', async (_event, scope) => {
+    return cloud.listCloud(scope === 'community' ? 'community' : 'mine');
+  });
+
+  ipcMain.handle('cloud:upload', async (_event, payload) => {
+    const skill = (payload && payload.skill) || {};
+    assertScannedPath(skill.directoryPath);
+    return cloud.uploadLocalSkill({
+      skill,
+      directoryPath: skill.directoryPath,
+      visibility: payload.visibility
+    });
+  });
+
+  ipcMain.handle('cloud:download', async (_event, payload) => {
+    if (!mainWindow) return null;
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '选择保存 Skill 的目录',
+      properties: ['openDirectory']
+    });
+    if (picked.canceled || !picked.filePaths.length) return null;
+    return cloud.downloadCloudSkill({
+      id: String((payload && payload.id) || ''),
+      targetDir: picked.filePaths[0]
+    });
+  });
+
+  ipcMain.handle('cloud:setVisibility', async (_event, payload) => {
+    return cloud.setVisibility({
+      id: String((payload && payload.id) || ''),
+      visibility: payload.visibility
+    });
+  });
+}
+
+/* ---------------- 自检模式（--smoke） ---------------- */
+
+/**
+ * `node scripts/desktop.js --smoke`：不弹窗口，跑一遍与真实点击「重新扫描」完全相同的
+ * 流水线（settings → scanner → usage），把摘要打到 stdout，退出码表达结果。
+ * 用途：本机与 CI 可复现地验证桌面端扫描路径，避免打包完成后才发现应用起不来。
+ * 正常启动不受影响（只有显式传 --smoke 才进入）。
+ */
+function isSmokeMode() {
+  return process.argv.includes('--smoke');
+}
+
+async function runSmoke() {
+  const settings = await readSettings(settingsPath());
+  const result = await runScan(settings);
+  const readyRoots = result.roots.filter((root) => root.status === 'ready').length;
+  const summary = {
+    ok: true,
+    skills: result.skills.length,
+    roots: `${readyRoots}/${result.roots.length}`,
+    followedLinks: (result.links.followed || []).length,
+    usage: result.usage ? 'read' : 'none'
+  };
+  console.log(`[smoke] ${JSON.stringify(summary)}`);
 }
 
 /* ---------------- 生命周期 ---------------- */
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (isSmokeMode()) {
+    try {
+      await runSmoke();
+      app.exit(0);
+    } catch (error) {
+      console.error(`[smoke] fail ${error && error.stack ? error.stack : error}`);
+      app.exit(1);
+    }
+    return;
+  }
   registerIpc();
   createWindow();
   app.on('activate', () => {
