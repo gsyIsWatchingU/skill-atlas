@@ -5,6 +5,10 @@
   "private": true,
   "license": "MIT",
   "main": "src/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gsyIsWatchingU/skill-atlas.git"
+  },
   "bin": {
     "skill-packer": "bin/skill-packer.js"
   },
@@ -71,7 +75,7 @@
       {
         "provider": "github",
         "owner": "gsyIsWatchingU",
-        "repo": "skill-packer"
+        "repo": "skill-atlas"
       }
     ]
   }
