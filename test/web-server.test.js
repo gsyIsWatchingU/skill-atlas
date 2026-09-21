@@ -136,7 +136,7 @@ async function login(baseUrl, user) {
   assert.equal(start.status, 302);
   const authorizeUrl = new URL(start.headers.get('location'));
   assert.equal(authorizeUrl.pathname, '/api/sso/authorize');
-  assert.equal(authorizeUrl.searchParams.get('client_id'), 'skill-dock');
+  assert.equal(authorizeUrl.searchParams.get('client_id'), 'skill-packer');
   assert.equal(authorizeUrl.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(authorizeUrl.searchParams.get('code_challenge').length, 43);
   const state = authorizeUrl.searchParams.get('state');
@@ -421,7 +421,7 @@ test('站内邮箱表单调用统一账号服务并建立本站会话', async (t
   assert.equal(registration.status, 201);
   assert.match(registration.headers.get('set-cookie'), /skill_atlas_session=/);
   assert.deepEqual(calls.map((item) => item.action), ['register-code', 'register']);
-  assert.equal(calls[1].payload.clientId, 'skill-dock');
+  assert.equal(calls[1].payload.clientId, 'skill-packer');
 });
 
 test('统一账号登录后按账号隔离私有 Skill，并公开社区 Skill', async (t) => {
@@ -433,7 +433,7 @@ test('统一账号登录后按账号隔离私有 Skill，并公开社区 Skill',
     ssoAuthBaseUrl: 'https://accounts.example.test',
     publicUrl: 'https://skills.example.test',
     exchangeSsoCode: async (_baseUrl, payload) => {
-      assert.equal(payload.clientId, 'skill-dock');
+      assert.equal(payload.clientId, 'skill-packer');
       assert.equal(payload.redirectUri, 'https://skills.example.test/auth/sso/callback');
       assert.equal(payload.codeVerifier.length, 43);
       return pendingUser;

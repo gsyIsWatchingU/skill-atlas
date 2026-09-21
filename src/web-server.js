@@ -918,7 +918,7 @@ function createSkillAtlasServer(options = {}) {
   const callSsoApi = options.callSsoApi || requestSsoApi;
   // 桌面安装包目录可注入，便于测试用临时目录，避免读真实的大安装包
   const desktopOutputDir = options.desktopOutputDir || DESKTOP_OUTPUT_DIR;
-  const ssoClientId = 'skill-dock';
+  const ssoClientId = 'skill-packer';
   const repository = options.repository || createPgRepository(options.databaseUrl ?? process.env.DATABASE_URL);
   const consumeAuthAttempt = createRateLimiter();
 

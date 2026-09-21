@@ -110,6 +110,10 @@ node bin/skill-packer.js scan .                  # 只扫描指定项目的 .age
 node bin/skill-packer.js scan . --json out.json  # 同时输出机器可读报告
 node bin/skill-packer.js scan . --include-scripts
 node bin/skill-packer.js scan . --no-follow-links  # 不跟随符号链接与 junction
+node bin/skill-packer.js catalog                 # 按类型统计 + 按业务流列出 Skill（分类快照 docs/skill-taxonomy.json）
+node bin/skill-packer.js catalog --workflow wf-xhs
+                                                 # 只看某条业务流引用的 Skill 组合
+node bin/skill-packer.js catalog --json out.json # 同时输出机器可读分类清单
 ~~~
 
 报告包含五类信息：
@@ -121,6 +125,10 @@ node bin/skill-packer.js scan . --no-follow-links  # 不跟随符号链接与 ju
   指向扫描根目录之外的目标会逐个列出真实路径；失效链接、链接成环与无权限目标各自告警。
   同一链接在一次扫描里只计一次。完整清单见 JSON 报告的 `links` 字段。
 - **需要注意**：同名 Skill（Codex 不合并同名项）、缺少 description、描述过长、含脚本文件。
+
+`catalog` 子命令把扫描结果与 `docs/skill-taxonomy.json` 分类快照对齐：按 13 个类型给出统计，
+并按 10 条业务流列出"引用哪些 Skill、哪些已安装"。它是"按业务流引用一组 Skill"的命令行入口，
+分类数据与交互图谱（`docs/skill-taxonomy.html`）同源，详见 [`docs/taxonomy.md`](docs/taxonomy.md)。
 
 ### 关于"使用统计"的口径
 
@@ -202,7 +210,7 @@ bash deploy/start.sh
 
 统一账号中心需登记：
 
-- 客户端：`skill-dock`
+- 客户端：`skill-packer`
 - 回调：`${PUBLIC_URL}/auth/sso/callback`
 
 ## 自动部署
