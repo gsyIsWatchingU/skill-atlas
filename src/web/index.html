@@ -172,9 +172,14 @@
   </dialog>
 
   <dialog id="auth-dialog">
+    <button id="cancel-auth" class="auth-close" type="button" aria-label="关闭">×</button>
     <form id="auth-form">
-      <p class="dialog-eyebrow">四站共用同一邮箱账号</p>
-      <h2 id="auth-title">登录 Skill Packer</h2>
+      <h1 class="auth-brand">
+        <span class="auth-brand-mark" aria-hidden="true"><img src="/icon.svg?v=2.4.0" alt=""></span>
+        <span>Skill Packer</span>
+      </h1>
+      <p class="auth-tagline">[ Agent 工作流环境管理器 ]</p>
+      <h2 id="auth-title" class="visually-hidden">登录 Skill Packer</h2>
       <div class="auth-tabs">
         <button id="auth-login-tab" class="active" type="button">登录</button>
         <button id="auth-register-tab" type="button">注册</button>
@@ -195,11 +200,9 @@
       <label class="field-label" for="auth-password">密码</label>
       <input id="auth-password" class="dialog-input" type="password" autocomplete="current-password" required>
       <p id="auth-message" class="auth-message hidden"></p>
+      <button id="submit-auth" class="button primary auth-submit" type="submit">登录</button>
       <div id="auth-reset-row" class="auth-reset-row"><a href="/api/auth/forgot-password">忘记密码</a></div>
-      <div class="dialog-actions">
-        <button id="cancel-auth" class="button secondary" type="button">取消</button>
-        <button id="submit-auth" class="button primary" type="submit">登录</button>
-      </div>
+      <p class="auth-note">邮箱是四个网站共用的唯一账号</p>
     </form>
   </dialog>
 

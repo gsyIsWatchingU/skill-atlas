@@ -325,7 +325,8 @@ h1 span { color: var(--pixel-green-strong); }
   .search-count { width: 100%; white-space: normal; }
 }
 dialog {
-  width: min(460px, calc(100% - 32px));
+  width: min(440px, calc(100% - 32px));
+  padding: 0;
   border: 2px solid var(--pixel-ink);
   border-radius: var(--pixel-radius);
   background: var(--pixel-surface);
@@ -333,28 +334,78 @@ dialog {
   box-shadow: var(--pixel-shadow);
 }
 dialog::backdrop { background: rgba(23, 28, 24, 0.62); }
-dialog form { padding: 10px; }
+dialog form { position: relative; padding: 42px 38px; display: flex; flex-direction: column; }
 dialog h2 { margin: 0 0 12px; }
-dialog p:not(.dialog-eyebrow) { color: var(--pixel-ink-secondary); line-height: 1.7; }
-.field-label { display: block; margin: 18px 0 7px; color: var(--pixel-ink-secondary); font-size: 12px; }
-.dialog-input {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
+dialog p:not(.dialog-eyebrow):not(.auth-tagline):not(.auth-note):not(.auth-message) { color: var(--pixel-ink-secondary); line-height: 1.7; }
+
+.auth-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
   border: 2px solid var(--pixel-ink);
   background: var(--pixel-surface);
   color: var(--pixel-ink);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
 }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; margin: 18px 0; border: 2px solid var(--pixel-ink); }
-.auth-tabs button { min-height: 40px; border: 0; background: var(--pixel-surface); }
+.auth-close:hover { background: var(--pixel-green-hover); }
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 4px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1;
+  color: var(--pixel-ink);
+}
+.auth-brand-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.auth-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+.auth-tagline {
+  margin: 0 0 18px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid var(--pixel-ink);
+  color: var(--pixel-ink-secondary);
+  font-size: 14px;
+}
+
+.field-label { display: block; margin: 15px 0 7px; color: var(--pixel-ink-secondary); font-size: 13px; }
+.dialog-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 11px;
+  border: 2px solid var(--pixel-ink);
+  background: var(--pixel-surface);
+  color: var(--pixel-ink);
+  font-size: 14px;
+}
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 18px; border: 2px solid var(--pixel-ink); }
+.auth-tabs button { min-height: 42px; border: 0; background: var(--pixel-surface); color: var(--pixel-ink-secondary); font-weight: 700; }
 .auth-tabs button + button { border-left: 2px solid var(--pixel-ink); }
-.auth-tabs button.active { background: var(--pixel-green); font-weight: 800; }
+.auth-tabs button.active { background: var(--pixel-green); color: var(--pixel-ink); font-weight: 700; }
 .auth-code-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.auth-code-row .button { min-height: 42px; white-space: nowrap; }
-.auth-message { margin: 14px 0 0 !important; color: var(--pixel-green-strong) !important; font-size: 12px; }
+.auth-code-row .button { min-height: 44px; white-space: nowrap; }
+.auth-message { margin: 14px 0 0 !important; color: var(--pixel-green-strong) !important; font-size: 13px; text-align: center; }
 .auth-message.error { color: var(--pixel-danger) !important; }
-.auth-reset-row { margin-top: 12px; font-size: 12px; text-align: center; }
+.auth-submit { width: 100%; min-height: 46px; margin-top: 4px; font-size: 15px; }
+.auth-reset-row { margin-top: 15px; font-size: 13px; text-align: center; }
 .auth-reset-row a { color: var(--pixel-green-strong); }
+.auth-note { margin: 15px 0 0; font-size: 13px; text-align: center; color: var(--pixel-ink-secondary); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 .toast {
   position: fixed;
@@ -414,6 +465,9 @@ dialog p:not(.dialog-eyebrow) { color: var(--pixel-ink-secondary); line-height: 
   .skill-grid { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .auth-code-row { grid-template-columns: 1fr; }
+  dialog form { padding: 34px 22px; }
+  .auth-brand { font-size: 22px; }
+  .auth-brand-mark { width: 36px; height: 36px; }
   .scan-directory-list { grid-template-columns: 1fr; }
   .scan-directory-footer { align-items: flex-start; flex-direction: column; }
 }
