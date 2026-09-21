@@ -26,6 +26,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { DEFAULT_ROOTS } = require('../ide-adapters');
 
 const SCANNER_VERSION = '1.1.0';
 
@@ -33,7 +34,9 @@ const MAX_SKILL_BYTES = 20 * 1024 * 1024;
 const MAX_SKILL_FILES = 1000;
 const MAX_SCAN_DEPTH = 12;
 const SKIP_DIRECTORIES = new Set([
-  '.git', '.svn', 'node_modules', '__pycache__', 'dist', 'build', 'coverage'
+  '.git', '.svn', 'node_modules', '__pycache__', 'dist', 'build', 'coverage',
+  // unify 统一技能库的备份目录（中央根内）：里面是被替换/回滚用的副本，不是可用的 Skill
+  '.unify-backup'
 ]);
 
 /**
@@ -42,74 +45,7 @@ const SKIP_DIRECTORIES = new Set([
  */
 const LINK_BUCKETS = ['followed', 'outsideRoot', 'broken', 'cycle', 'denied', 'notFollowed'];
 
-/**
- * 默认扫描根。
- *
- * 覆盖本机四类 Skill 来源：Codex（个人 + 插件缓存）、跨 Agent 共享、
- * WorkBuddy、豆包（内置 + 用户自定义）。缺失的根如实报 `missing`，不臆造。
- *
- * 路径基准分两种：
- *   - 默认相对用户主目录（%USERPROFILE%）：segments 直接拼在 home 下。
- *   - `base: 'localAppData'`：豆包桌面端的技能不在主目录，而在
- *     %LOCALAPPDATA%\Doubao\... 下，单独用一个基准解析。
- *
- * §7「最小授权」要求这些根是**默认候选**，调用方（桌面首启、CLI）可裁剪；
- * `required: false` 表示缺失不报错。
- */
-const DEFAULT_ROOTS = [
-  {
-    id: 'codex-user',
-    platform: 'codex',
-    scope: 'user',
-    label: 'Codex 个人 Skill',
-    displayPath: '%USERPROFILE%\\.codex\\skills',
-    segments: ['.codex', 'skills']
-  },
-  {
-    id: 'shared-agents',
-    platform: 'shared',
-    scope: 'user',
-    label: '跨 Agent 共享 Skill',
-    displayPath: '%USERPROFILE%\\.agents\\skills',
-    segments: ['.agents', 'skills']
-  },
-  {
-    id: 'workbuddy-user',
-    platform: 'workbuddy',
-    scope: 'user',
-    label: 'WorkBuddy 个人 Skill',
-    displayPath: '%USERPROFILE%\\.workbuddy\\skills',
-    segments: ['.workbuddy', 'skills']
-  },
-  {
-    id: 'doubao-system',
-    platform: 'doubao',
-    scope: 'system',
-    system: true,
-    label: '豆包内置 Skill',
-    base: 'localAppData',
-    displayPath: '%LOCALAPPDATA%\\Doubao\\User Data\\Default\\.doubao\\agent_mode\\workspace\\.skills',
-    segments: ['Doubao', 'User Data', 'Default', '.doubao', 'agent_mode', 'workspace', '.skills']
-  },
-  {
-    id: 'doubao-user',
-    platform: 'doubao',
-    scope: 'user',
-    label: '豆包用户 Skill',
-    base: 'localAppData',
-    displayPath: '%LOCALAPPDATA%\\Doubao\\User Data\\Default\\.doubao\\agent_mode\\workspace\\.user_skills',
-    segments: ['Doubao', 'User Data', 'Default', '.doubao', 'agent_mode', 'workspace', '.user_skills']
-  },
-  {
-    id: 'codex-plugins',
-    platform: 'codex',
-    scope: 'plugin',
-    system: true,
-    label: 'Codex 插件 Skill',
-    displayPath: '%USERPROFILE%\\.codex\\plugins\\cache',
-    segments: ['.codex', 'plugins', 'cache']
-  }
-];
+// 默认根来自声明式 IDE adapter 注册表；缺失目录如实报 missing，不自动创建。
 
 /* ---------------- 元数据 ---------------- */
 
@@ -372,6 +308,9 @@ async function readSkill(directoryPath, root, relativeSegments, options = {}, st
     realDirectoryPath = await fs.realpath(directoryPath).catch(() => directoryPath);
   }
 
+  const ownership = (root.system || root.id === 'codex-plugins' || isSystemPath(relativeSegments))
+    ? 'system'
+    : 'personal';
   const skill = {
     // 稳定标识：用逻辑目录路径。它是"这一次扫描里的这个 Skill 实例"的身份，
     // 渲染层的选中态、自定义简介的键都依赖它 —— 缺了它这些功能会静默失效。
@@ -384,7 +323,11 @@ async function readSkill(directoryPath, root, relativeSegments, options = {}, st
     source: root.label,
     rootId: root.id,
     scanDirectoryId: root.id,
-    ownership: (root.system || root.id === 'codex-plugins' || isSystemPath(relativeSegments)) ? 'system' : 'personal',
+    ownership,
+    ownershipLabel: ownership === 'system' ? 'IDE 自带 / 插件' : '个人 / 下载',
+    provenance: ownership === 'system' ? 'ide' : 'unknown',
+    adapterId: root.adapterId || 'custom',
+    unifyEligible: ownership === 'personal' && root.unifyEligible !== false,
     versionHash: computeVersionHash(collected.files),
     fileCount: collected.files.length,
     sizeBytes: collected.sizeBytes,
@@ -496,6 +439,12 @@ async function scanRoots(options = {}) {
         id: root.id,
         label: root.label,
         platform: root.platform || 'shared',
+        adapterId: root.adapterId || 'custom',
+        adapterName: root.adapterName || root.label,
+        unifyTarget: root.unifyTarget === true,
+        unifyEligible: root.unifyEligible !== false,
+        linkVerified: root.linkVerified === true,
+        directSharedDiscovery: root.directSharedDiscovery === true,
         path: root.absolutePath,
         displayPath: root.displayPath,
         status: 'ready',
@@ -508,6 +457,12 @@ async function scanRoots(options = {}) {
         id: root.id,
         label: root.label,
         platform: root.platform || 'shared',
+        adapterId: root.adapterId || 'custom',
+        adapterName: root.adapterName || root.label,
+        unifyTarget: root.unifyTarget === true,
+        unifyEligible: root.unifyEligible !== false,
+        linkVerified: root.linkVerified === true,
+        directSharedDiscovery: root.directSharedDiscovery === true,
         path: root.absolutePath,
         displayPath: root.displayPath,
         status: missing ? 'missing' : 'error',

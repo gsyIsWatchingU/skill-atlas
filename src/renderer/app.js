@@ -24,7 +24,8 @@ const state = {
   cloudUser: null,
   cloudTab: 'mine',
   cloudSkills: [],
-  ai: { config: null, candidates: null, preview: null, advice: null }
+  ai: { config: null, candidates: null, preview: null, advice: null },
+  unify: { preview: null, lastManifest: null }
 };
 
 const $ = (id) => document.getElementById(id);
@@ -57,7 +58,10 @@ function formatRecent(value) {
   return `${Math.floor(days / 365)} 年前`;
 }
 
-const PLATFORM_NAMES = { codex: 'Codex', doubao: '豆包', workbuddy: 'WorkBuddy', shared: '共享' };
+const PLATFORM_NAMES = {
+  codex: 'Codex', claude: 'Claude Code', cursor: 'Cursor', trae: 'Trae',
+  doubao: '豆包', workbuddy: 'WorkBuddy', shared: '共享'
+};
 const SCOPE_NAMES = { user: '用户级', plugin: '插件', system: '内置', project: '项目级', custom: '自定义' };
 
 let toastTimer = null;
@@ -113,10 +117,15 @@ function getFilteredSkills() {
   let skills = allSkills();
 
   switch (state.scope) {
-    case 'codex': skills = skills.filter((s) => s.platform === 'codex'); break;
-    case 'doubao': skills = skills.filter((s) => s.platform === 'doubao'); break;
-    case 'workbuddy': skills = skills.filter((s) => s.platform === 'workbuddy'); break;
-    case 'shared': skills = skills.filter((s) => s.platform === 'shared'); break;
+    case 'codex':
+    case 'claude':
+    case 'cursor':
+    case 'trae':
+    case 'doubao':
+    case 'workbuddy':
+    case 'shared':
+      skills = skills.filter((s) => s.platform === state.scope);
+      break;
     case 'duplicate':
       skills = skills.filter((s) => duplicates.has(String(s.name || '').trim().toLocaleLowerCase('en-US')));
       break;
@@ -161,6 +170,9 @@ function updateCounts() {
     all: skills.length,
     usage: skills.filter((s) => s.usage && s.usage.total > 0).length,
     codex: skills.filter((s) => s.platform === 'codex').length,
+    claude: skills.filter((s) => s.platform === 'claude').length,
+    cursor: skills.filter((s) => s.platform === 'cursor').length,
+    trae: skills.filter((s) => s.platform === 'trae').length,
     doubao: skills.filter((s) => s.platform === 'doubao').length,
     workbuddy: skills.filter((s) => s.platform === 'workbuddy').length,
     shared: skills.filter((s) => s.platform === 'shared').length,
@@ -249,7 +261,8 @@ function renderScopeOptions() {
   const select = $('scope-filter');
   select.textContent = '';
   const options = [
-    ['all', '全部'], ['codex', 'Codex'], ['doubao', '豆包'], ['workbuddy', 'WorkBuddy'], ['shared', '共享目录'],
+    ['all', '全部'], ['codex', 'Codex'], ['claude', 'Claude Code'], ['cursor', 'Cursor'], ['trae', 'Trae'],
+    ['doubao', '豆包'], ['workbuddy', 'WorkBuddy'], ['shared', '共享目录'],
     ['usage', '已调用过'], ['unused', '从未调用'], ['duplicate', '重名技能']
   ];
   for (const [value, label] of options) {
@@ -299,6 +312,11 @@ function createSkillCard(skill, index) {
   scope.className = 'pill';
   scope.textContent = SCOPE_NAMES[skill.scope] || skill.scope || '用户级';
   pills.append(scope);
+
+  const ownership = document.createElement('span');
+  ownership.className = `pill ${skill.ownership === 'system' ? 'pill-system' : 'pill-personal'}`;
+  ownership.textContent = skill.ownershipLabel || (skill.ownership === 'system' ? 'IDE 自带 / 插件' : '个人 / 下载');
+  pills.append(ownership);
 
   if (skill.customDescription) {
     const custom = document.createElement('span');
@@ -440,6 +458,7 @@ function setView(view) {
   $('view-catalog').hidden = view !== 'catalog';
   $('view-usage').hidden = view !== 'usage';
   $('view-ai').hidden = view !== 'ai';
+  $('view-unify').hidden = view !== 'unify';
   $('view-cloud').hidden = view !== 'cloud';
   for (const node of document.querySelectorAll('.nav-item')) {
     // 没有 data-scope 的入口（AI 整理 / 云同步）只比视图名，
@@ -450,6 +469,116 @@ function setView(view) {
     node.classList.toggle('is-active', active);
   }
   saveUiState();
+}
+
+/* ---------------- 统一技能库 ---------------- */
+
+function setUnifyStatus(text) {
+  $('unify-status').textContent = text;
+}
+
+function setUnifyRollbackAvailable(available) {
+  $('unify-rollback-btn').disabled = !available;
+}
+
+function unifyActionLabel(action) {
+  const labels = {
+    'create-junction': '创建链接',
+    'replace-with-junction': '正本移入中央，原位补链接',
+    'replace-duplicate': '备份重复副本并替换为链接',
+    'replace-renamed': '备份改名副本并替换为链接',
+    'replace-conflict': '按你的选择备份冲突版本并替换为链接',
+    'skip-local': '保留本地分叉',
+    'skip-conflict': '等待选择'
+  };
+  return labels[action] || action;
+}
+
+function renderUnifyPreview() {
+  const preview = state.unify.preview;
+  const box = $('unify-preview');
+  const targets = $('unify-targets');
+  const conflicts = $('unify-conflicts');
+  const actions = $('unify-actions');
+  targets.textContent = '';
+  conflicts.textContent = '';
+  actions.textContent = '';
+  box.hidden = !preview;
+  if (!preview) return;
+
+  const summary = preview.summary;
+  $('unify-summary').textContent = [
+    `个人 Skill ${summary.names}`,
+    `移入中央 ${summary.moves}`,
+    `新建链接 ${summary.createJunctions}`,
+    `替换重复 ${summary.replaceDuplicates + summary.replaceRenamed}`,
+    `待处理冲突 ${summary.unresolvedConflicts}`
+  ].join(' ｜ ');
+
+  for (const root of preview.targetRoots) {
+    const pill = document.createElement('span');
+    pill.className = `pill ${root.linkVerified ? 'pill-personal' : 'pill-warn'}`;
+    pill.textContent = `${root.adapterName || PLATFORM_NAMES[root.platform] || root.platform}${root.linkVerified ? '' : '（链接待验证）'}`;
+    pill.title = root.path;
+    targets.append(pill);
+  }
+
+  const conflictItems = preview.items.filter((item) => item.conflict);
+  for (const item of conflictItems) {
+    const row = document.createElement('label');
+    row.className = 'unify-conflict';
+    const title = document.createElement('strong');
+    title.textContent = `${item.name}：同名但内容不同`;
+    const select = document.createElement('select');
+    select.className = 'unify-conflict-select';
+    select.dataset.groupId = item.groupId;
+    const skip = document.createElement('option');
+    skip.value = '';
+    skip.textContent = '安全跳过，不改这个 Skill';
+    select.append(skip);
+    for (const candidate of item.candidates) {
+      const option = document.createElement('option');
+      option.value = candidate.id;
+      option.textContent = `${PLATFORM_NAMES[candidate.platform] || candidate.platform}｜${String(candidate.versionHash || '').slice(0, 8)}｜${candidate.fileCount || 0} 文件｜${formatDate(candidate.modifiedAt)}`;
+      option.title = candidate.directoryPath;
+      select.append(option);
+    }
+    const note = document.createElement('span');
+    note.textContent = '选择某个版本后，其余冲突版本会先备份，再替换成指向所选正本的链接。';
+    row.append(title, select, note);
+    conflicts.append(row);
+  }
+
+  for (const item of preview.items) {
+    const group = document.createElement('div');
+    group.className = 'unify-action-group';
+    const head = document.createElement('strong');
+    head.textContent = item.blocked
+      ? `${item.name}｜冲突，默认跳过`
+      : `${item.name}｜${item.centralAction === 'keep' ? '复用中央正本' : '移动到中央正本'}`;
+    group.append(head);
+    const list = document.createElement('ul');
+    for (const link of item.links) {
+      const li = document.createElement('li');
+      li.textContent = `${PLATFORM_NAMES[link.platform] || link.platform}：${unifyActionLabel(link.action)}｜${link.linkPath}`;
+      list.append(li);
+    }
+    if (!item.links.length) {
+      const li = document.createElement('li');
+      li.textContent = item.blocked ? '未选择版本，不执行任何写入。' : '中央正本无需新增链接。';
+      list.append(li);
+    }
+    group.append(list);
+    actions.append(group);
+  }
+}
+
+function collectUnifyConflictChoices() {
+  const choices = {};
+  for (const select of document.querySelectorAll('.unify-conflict-select')) {
+    if (select.value) choices[select.dataset.groupId] = select.value;
+  }
+  return choices;
 }
 
 /* ---------------- 云同步 ---------------- */
@@ -645,6 +774,10 @@ function createAiMemberRow(skill, role) {
   scope.className = 'pill';
   scope.textContent = SCOPE_NAMES[skill.scope] || skill.scope || '用户级';
   pills.append(scope);
+  const ownership = document.createElement('span');
+  ownership.className = `pill ${skill.ownership === 'system' ? 'pill-system' : 'pill-personal'}`;
+  ownership.textContent = skill.ownershipLabel || (skill.ownership === 'system' ? 'IDE 自带 / 插件' : '个人 / 下载');
+  pills.append(ownership);
   const hash = document.createElement('span');
   hash.className = 'pill pill-mono';
   hash.textContent = `hash ${skill.versionHash || '—'}`;
@@ -932,6 +1065,11 @@ function openDetail(skill) {
   scope.textContent = SCOPE_NAMES[skill.scope] || skill.scope || '用户级';
   pills.append(scope);
 
+  const detailOwnership = document.createElement('span');
+  detailOwnership.className = `pill ${skill.ownership === 'system' ? 'pill-system' : 'pill-personal'}`;
+  detailOwnership.textContent = skill.ownershipLabel || (skill.ownership === 'system' ? 'IDE 自带 / 插件' : '个人 / 下载');
+  pills.append(detailOwnership);
+
   const alert = $('detail-alert');
   const alerts = [];
   if (duplicates.has(String(skill.name || '').trim().toLocaleLowerCase('en-US'))) {
@@ -995,9 +1133,7 @@ function render() {
   renderUsageDashboard();
   renderCloud();
   renderAi();
-  setView(state.view === 'usage' ? 'usage'
-    : state.view === 'ai' ? 'ai'
-      : state.view === 'cloud' ? 'cloud' : 'catalog');
+  setView(['catalog', 'usage', 'ai', 'unify', 'cloud'].includes(state.view) ? state.view : 'catalog');
 }
 
 async function scan() {
@@ -1069,6 +1205,66 @@ function bindEvents() {
       if (file) showToast('清单已导出（不含脚本内容）');
     } catch (error) {
       showToast(`导出失败：${error.message || error}`);
+    }
+  });
+
+  $('unify-apply-btn').addEventListener('click', async () => {
+    const btn = $('unify-apply-btn');
+    btn.disabled = true;
+    try {
+      if (!state.unify.preview) {
+        btn.textContent = '正在生成预览…';
+        state.unify.preview = await window.skillPacker.unifyPreview();
+        renderUnifyPreview();
+        const count = state.unify.preview.summary.unresolvedConflicts;
+        setUnifyStatus(count ? `发现 ${count} 个同名冲突；可选择版本，也可以保持“安全跳过”。` : '预览已生成。请核对来源、目标与操作后再次确认。');
+        btn.textContent = '确认执行上述计划';
+        return;
+      }
+      btn.textContent = '正在执行…';
+      const result = await window.skillPacker.unifyApply({
+        planId: state.unify.preview.planId,
+        conflictChoices: collectUnifyConflictChoices()
+      });
+      state.unify.lastManifest = result.manifestPath;
+      state.unify.preview = null;
+      // 执行后统一已落盘：刷新扫描结果（catalog / 统计）
+      state.scan = await window.skillPacker.scan();
+      render();
+      renderUnifyPreview();
+      setUnifyStatus(
+        `统一完成：移进中央 ${result.summary.moved}｜建链接 ${result.summary.junctioned}｜备份副本 ${result.summary.removedDuplicates}｜跳过冲突 ${result.summary.skippedConflicts}`
+      );
+      setUnifyRollbackAvailable(true);
+      btn.textContent = '重新生成预览';
+      showToast('统一完成，可随时回滚');
+    } catch (error) {
+      showToast(`统一失败：${error.message || error}`);
+      btn.textContent = state.unify.preview ? '确认执行上述计划' : '生成统一预览';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('unify-rollback-btn').addEventListener('click', async () => {
+    if (!state.unify.lastManifest) return;
+    const btn = $('unify-rollback-btn');
+    btn.disabled = true;
+    try {
+      await window.skillPacker.unifyRollback(state.unify.lastManifest);
+      state.unify.lastManifest = null;
+      state.unify.preview = null;
+      state.scan = await window.skillPacker.scan();
+      render();
+      renderUnifyPreview();
+      setUnifyStatus('已按 manifest 回滚到执行前的状态');
+      setUnifyRollbackAvailable(false);
+      $('unify-apply-btn').textContent = '生成统一预览';
+      showToast('已回滚');
+    } catch (error) {
+      showToast(`回滚失败：${error.message || error}`);
+    } finally {
+      btn.disabled = false;
     }
   });
 
@@ -1363,6 +1559,16 @@ async function boot() {
   } catch {
     state.ai.config = null;
   }
+  try {
+    const status = await window.skillPacker.unifyStatus();
+    if (status && ['completed', 'failed', 'started'].includes(status.status)) {
+      state.unify.lastManifest = status.manifestPath;
+      setUnifyRollbackAvailable(true);
+      setUnifyStatus(status.status === 'completed'
+        ? `可回滚最近一次统一：${formatDate(status.timestamp)}`
+        : `检测到未完整执行的统一记录（${status.status}），可按 manifest 恢复。`);
+    }
+  } catch { /* 没有历史统一记录 */ }
   await scan();
   render();
 }

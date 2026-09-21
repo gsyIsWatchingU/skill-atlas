@@ -7,10 +7,10 @@
  *   本应用是 **C 通道（本地可信宿主）的主载体**，不是新通道。
  *   C 的定义从「扩展 + Native Messaging」提升为「可读取并修改受管目录的本地可信宿主」，
  *   载体可以是 Electron 桌面应用，也可以是扩展 + Native Messaging。
- *   当前版本只启用 C 的 **read capability**（只读扫描），写入能力留给 M2。
+ *   当前版本默认只读；「统一技能库」是唯一写入口，执行前预览并写 manifest，可回滚。
  *
  * 本轮不做的事（避免与 §2 原则 1 冲突）：
- *   - 不申请任何写入权限，不建/删链接，不碰 config.toml
+ *   - 不修改 config.toml，不接受渲染层传入任意文件路径
  *   - 不启动本地 HTTP 服务（历史 helper 的 127.0.0.1:18787 在这里不存在，
  *     顺带消掉 §11 缺陷 #2「配对令牌走 URL hash + Allow-Private-Network」）
  *   - 不联网上传（用户要上传时走既有 Web 的显式动作）
@@ -20,6 +20,7 @@ const { app, BrowserWindow, ipcMain, clipboard, shell, dialog } = require('elect
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash, randomUUID } = require('node:crypto');
 
 const scanner = require('./scanner');
 const cloud = require('./cloud-client');
@@ -33,7 +34,8 @@ const {
   buildUnifyPlan,
   applyUnify,
   rollbackUnify,
-  enrichWithFingerprints
+  enrichWithFingerprints,
+  validateUnifyManifest
 } = require('./unify');
 const {
   aiMissingFields,
@@ -61,6 +63,8 @@ const DEFAULT_WINDOW = {
 let mainWindow = null;
 /** 最近一次扫描结果留在内存（§7 纯本地：不落盘、不上传） */
 let lastScan = null;
+/** 最近一次统一预览；执行时必须重新扫描并校验签名，防止按过期计划动盘。 */
+let pendingUnify = null;
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -371,12 +375,81 @@ function registerIpc() {
     return enrichWithFingerprints(result);
   }
 
-  // 执行统一：移动正本进中央、各 IDE 建 junction，写 manifest；完成后刷新扫描结果
-  ipcMain.handle('unify:apply', async () => {
+  function unifyScanSignature(result) {
+    const rows = (result.skills || [])
+      .filter((skill) => skill.ownership !== 'system' && skill.unifyEligible !== false)
+      .map((skill) => [skill.rootId, skill.directoryPath, skill.versionHash].join('\0'))
+      .sort();
+    return createHash('sha256').update(rows.join('\n'), 'utf8').digest('hex');
+  }
+
+  function serializeUnifyPlan(plan, planId) {
+    return {
+      planId,
+      centralDir: plan.centralDir,
+      targetRoots: plan.targetRoots,
+      summary: plan.summary,
+      items: plan.items.map((item) => ({
+        groupId: item.groupId,
+        name: item.name,
+        conflict: item.conflict,
+        blocked: item.blocked,
+        centralAction: item.centralAction,
+        centralPath: item.centralPath,
+        canonical: item.canonical,
+        candidates: item.candidates,
+        links: item.links,
+        superseded: item.superseded
+      }))
+    };
+  }
+
+  async function latestUnifyManifest() {
+    const result = await scanner.scanRoots({ roots: scanner.DEFAULT_ROOTS, includeFiles: false });
+    const central = result.roots.find((root) => root.id === 'shared-agents');
+    if (!central) return null;
+    const backupDir = path.join(central.path, '.unify-backup');
+    const entries = await fs.readdir(backupDir, { withFileTypes: true }).catch(() => []);
+    const names = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().reverse();
+    for (const name of names) {
+      const manifestPath = path.join(backupDir, name, 'manifest.json');
+      try {
+        const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+        return { manifestPath, status: manifest.status || 'completed', timestamp: manifest.timestamp || name };
+      } catch { /* 损坏或未完整写入的记录继续向前找 */ }
+    }
+    return null;
+  }
+
+  // 预览只扫描和算计划，不写磁盘。
+  ipcMain.handle('unify:preview', async () => {
     const enriched = await runUnifyScan();
     const plan = buildUnifyPlan(enriched);
-    if (!plan.items.length) throw new Error('没有可统一的 Skill');
+    if (!plan.items.length) throw new Error('没有可统一的个人 Skill');
+    const planId = randomUUID();
+    pendingUnify = { planId, signature: unifyScanSignature(enriched) };
+    return serializeUnifyPlan(plan, planId);
+  });
+
+  // 执行统一：只接受预览编号和候选编号；重新扫描一致后才移动正本、建 junction。
+  ipcMain.handle('unify:apply', async (_event, payload) => {
+    const planId = String((payload && payload.planId) || '');
+    if (!pendingUnify || pendingUnify.planId !== planId) throw new Error('预览已失效，请重新生成');
+    const enriched = await runUnifyScan();
+    if (unifyScanSignature(enriched) !== pendingUnify.signature) {
+      pendingUnify = null;
+      throw new Error('Skill 目录在预览后发生变化，请重新生成预览');
+    }
+    const rawChoices = payload && payload.conflictChoices;
+    const conflictChoices = {};
+    if (rawChoices && typeof rawChoices === 'object' && !Array.isArray(rawChoices)) {
+      for (const [groupId, candidateId] of Object.entries(rawChoices)) {
+        if (typeof candidateId === 'string' && candidateId) conflictChoices[String(groupId)] = candidateId;
+      }
+    }
+    const plan = buildUnifyPlan(enriched, { conflictChoices });
     const { manifest, manifestPath } = await applyUnify(plan);
+    pendingUnify = null;
     const settings = await readSettings(settingsPath());
     lastScan = await runScan(settings);
     return {
@@ -385,10 +458,13 @@ function registerIpc() {
         moved: manifest.moved.length,
         junctioned: manifest.junctioned.length,
         removedDuplicates: manifest.removedDuplicates.length,
-        backedUp: manifest.backedUp.length
+        backedUp: manifest.backedUp.length,
+        skippedConflicts: plan.summary.unresolvedConflicts
       }
     };
   });
+
+  ipcMain.handle('unify:status', async () => latestUnifyManifest());
 
   // 回滚：只接受中央目录 .unify-backup 区内的 manifest，不接受任意路径
   ipcMain.handle('unify:rollback', async (_event, manifestPath) => {
@@ -400,7 +476,15 @@ function registerIpc() {
       throw new Error('只允许回滚统一备份区内的 manifest');
     }
     const manifest = JSON.parse(await fs.readFile(full, 'utf8'));
+    validateUnifyManifest(manifest, {
+      centralDir: central.path,
+      manifestPath: full,
+      targetRoots: result.roots
+        .filter((root) => root.unifyTarget && root.unifyEligible !== false)
+        .map((root) => root.path)
+    });
     await rollbackUnify(manifest);
+    pendingUnify = null;
     const settings = await readSettings(settingsPath());
     lastScan = await runScan(settings);
     return true;
@@ -559,8 +643,8 @@ function registerIpc() {
 /* ---------------- 自检模式（--smoke） ---------------- */
 
 /**
- * `node scripts/desktop.js --smoke`：不弹窗口，跑一遍与真实点击「重新扫描」完全相同的
- * 流水线（settings → scanner → usage），把摘要打到 stdout，退出码表达结果。
+ * `node scripts/desktop.js --smoke`：不弹窗口，真实加载 preload + renderer，等待首页扫描完成，
+ * 再进入「统一技能库」生成只读预览；把 DOM 与 IPC 摘要打到 stdout，退出码表达结果。
  * 用途：本机与 CI 可复现地验证桌面端扫描路径，避免打包完成后才发现应用起不来。
  * 正常启动不受影响（只有显式传 --smoke 才进入）。
  */
@@ -569,17 +653,70 @@ function isSmokeMode() {
 }
 
 async function runSmoke() {
-  const settings = await readSettings(settingsPath());
-  const result = await runScan(settings);
-  const readyRoots = result.roots.filter((root) => root.status === 'ready').length;
+  const errors = [];
+  const smokeWindow = new BrowserWindow({
+    ...DEFAULT_WINDOW,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  smokeWindow.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) errors.push(`console: ${message}`);
+  });
+  smokeWindow.webContents.on('render-process-gone', (_event, details) => {
+    errors.push(`render-gone: ${JSON.stringify(details)}`);
+  });
+  smokeWindow.webContents.on('preload-error', (_event, filePath, error) => {
+    errors.push(`preload-error: ${filePath} ${error.message}`);
+  });
+  smokeWindow.webContents.on('did-fail-load', (_event, code, description) => {
+    errors.push(`did-fail-load: ${code} ${description}`);
+  });
+
+  const waitFor = async (expression, timeoutMs = 30000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await smokeWindow.webContents.executeJavaScript(`Boolean(${expression})`)) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error(`渲染层等待超时：${expression}`);
+  };
+
+  await smokeWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  await waitFor("document.querySelectorAll('#root-list .root-item').length > 0 && !document.querySelector('#rescan').disabled");
+  await smokeWindow.webContents.executeJavaScript(`
+    document.querySelector('[data-view="unify"]').click();
+    document.querySelector('#unify-apply-btn').click();
+  `);
+  await waitFor("document.querySelector('#unify-apply-btn').textContent.includes('确认执行')", 45000);
+
+  const probe = await smokeWindow.webContents.executeJavaScript(`({
+    cards: document.querySelectorAll('#skill-grid .skill-card').length,
+    roots: document.querySelectorAll('#root-list .root-item').length,
+    unifyVisible: !document.querySelector('#view-unify').hidden,
+    previewVisible: !document.querySelector('#unify-preview').hidden,
+    ownershipBadges: document.querySelectorAll('.pill-system, .pill-personal').length,
+    status: document.querySelector('#unify-status').textContent.trim(),
+    actionGroups: document.querySelectorAll('#unify-actions .unify-action-group').length
+  })`);
+  if (probe.cards <= 0) errors.push('渲染层未展示任何 Skill 卡片');
+  if (probe.roots <= 0) errors.push('渲染层未展示扫描根');
+  if (!probe.unifyVisible || !probe.previewVisible) errors.push('统一技能库预览未显示');
+  if (probe.ownershipBadges <= 0) errors.push('未渲染系统 / 个人来源标签');
+  if (probe.actionGroups <= 0) errors.push('统一预览没有操作清单');
+
   const summary = {
-    ok: true,
-    skills: result.skills.length,
-    roots: `${readyRoots}/${result.roots.length}`,
-    followedLinks: (result.links.followed || []).length,
-    usage: result.usage ? 'read' : 'none'
+    ok: errors.length === 0,
+    ...probe,
+    errors
   };
   console.log(`[smoke] ${JSON.stringify(summary)}`);
+  smokeWindow.destroy();
+  if (errors.length) throw new Error(errors.join('；'));
 }
 
 /* ---------------- 生命周期 ---------------- */
@@ -587,6 +724,7 @@ async function runSmoke() {
 app.whenReady().then(async () => {
   if (isSmokeMode()) {
     try {
+      registerIpc();
       await runSmoke();
       app.exit(0);
     } catch (error) {

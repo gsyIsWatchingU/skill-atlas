@@ -262,6 +262,19 @@ test('同名 Skill 不合并，只按物理目录去重（§6）', async (t) => 
   assert.equal(scanner.dedupeByDirectory(result.skills).length, 2);
 });
 
+test('.unify-backup 备份目录不当作 Skill 扫描', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-packer-core-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  await writeSkill(path.join(home, '.agents', 'skills', 'alpha'), 'alpha', '正本');
+  // 模拟 unify 执行后的备份副本（removed-duplicates / central-conflict）
+  await writeSkill(path.join(home, '.agents', 'skills', '.unify-backup', '2026-09-20', 'removed-duplicates', 'alpha'), 'alpha', '备份副本');
+
+  const result = await scanner.scanRoots({ homeDirectory: home, roots: [AGENTS_ROOT] });
+
+  assert.equal(result.skills.length, 1, '备份目录里的副本不应被扫成 Skill');
+  assert.equal(result.skills[0].name, 'alpha');
+});
+
 test('dedupeByDirectory 去掉同一物理目录的重复实例', () => {
   const skills = [
     // 同一个目录的两个逻辑路径（一个是链接、一个是真实路径）

@@ -1,6 +1,6 @@
 {
   "name": "skill-packer",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "面向项目的 Agent 工作流环境管理器：本地只读扫描、项目级隔离与工作流包分享",
   "private": true,
   "license": "MIT",
@@ -22,7 +22,7 @@
     "desktop:smoke": "node scripts/desktop.js --smoke",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
-    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js test/unify.test.js test/ai-advisor.test.js"
+    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js test/unify.test.js test/ide-adapters.test.js test/ai-advisor.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -43,7 +43,10 @@
       "src/preload.js",
       "src/cloud-client.js",
       "src/settings.js",
+      "src/translator.js",
       "src/usage-scanner.js",
+      "src/unify.js",
+      "src/ide-adapters.js",
       "src/ai/**/*",
       "src/scanner/**/*",
       "src/renderer/**/*",

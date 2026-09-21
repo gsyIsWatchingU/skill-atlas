@@ -28,6 +28,15 @@
         <button class="nav-item" data-view="catalog" data-scope="codex" type="button">
           <span>Codex</span><span class="nav-count" data-count="codex">0</span>
         </button>
+        <button class="nav-item" data-view="catalog" data-scope="claude" type="button">
+          <span>Claude Code</span><span class="nav-count" data-count="claude">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="cursor" type="button">
+          <span>Cursor</span><span class="nav-count" data-count="cursor">0</span>
+        </button>
+        <button class="nav-item" data-view="catalog" data-scope="trae" type="button">
+          <span>Trae</span><span class="nav-count" data-count="trae">0</span>
+        </button>
         <button class="nav-item" data-view="catalog" data-scope="doubao" type="button">
           <span>豆包</span><span class="nav-count" data-count="doubao">0</span>
         </button>
@@ -213,17 +222,26 @@
             <div>
               <h2 class="panel-title">统一技能库</h2>
               <p class="panel-note">
-                把所有个人 Skill 汇聚到中央目录 <code>.agents\skills</code>，Codex / WorkBuddy / 豆包
-                各自目录里保留指向中央的链接，一份物理文件、三个 IDE 同时识别。
-                执行会写 manifest，随时可一键回滚。
+                把个人 / 下载 Skill 汇聚到中央目录 <code>.agents\skills</code>；IDE 自带与插件 Skill
+                永远只读。各 IDE 目录逐项保留 Junction，一份物理文件、多端识别。
               </p>
             </div>
           </div>
 
-          <p class="catalog-hint" id="unify-status">还没执行过统一。点「执行统一」即可。</p>
+          <p class="catalog-hint" id="unify-status">先生成只读预览；第二次确认才会移动目录和创建链接。</p>
+
+          <div id="unify-preview" class="unify-preview" hidden>
+            <p id="unify-summary" class="unify-summary"></p>
+            <div id="unify-targets" class="pill-row"></div>
+            <div id="unify-conflicts" class="unify-conflicts"></div>
+            <details class="unify-details" open>
+              <summary>逐项操作清单</summary>
+              <div id="unify-actions" class="unify-actions"></div>
+            </details>
+          </div>
 
           <div class="ai-steps">
-            <button id="unify-apply-btn" class="primary-button" type="button">执行统一</button>
+            <button id="unify-apply-btn" class="primary-button" type="button">生成统一预览</button>
             <button id="unify-rollback-btn" class="ghost-button" type="button" disabled>回滚上次统一</button>
           </div>
         </div>

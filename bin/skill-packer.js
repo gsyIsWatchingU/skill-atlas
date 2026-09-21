@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Skill Packer 命令行入口：只读、纯本地、不联网。
+// Skill Packer 命令行入口：默认只读、纯本地、不联网；仅 unify --apply / --rollback 写盘。
 // 设计原则：默认 dry-run，先把"发现了什么、会传什么、不传什么"打给用户看，
 // 再让用户自己决定下一步。命令本身就承担解释与自证的职责。
 
@@ -16,10 +16,12 @@ const {
 const {
   buildUnifyPlan,
   applyUnify,
-  rollbackUnify
+  rollbackUnify,
+  enrichWithFingerprints,
+  validateUnifyManifest
 } = require('../src/unify');
 
-const CLI_VERSION = '0.1.0';
+const CLI_VERSION = '0.2.0';
 
 // Codex 初始技能列表的字符预算：上下文窗口未知时为 8000 字符。
 // 超过这个值，Codex 会先缩短描述，再多则从列表中省略部分 Skill。
@@ -419,14 +421,14 @@ function renderUnifyPlan(plan) {
   lines.push(bold('汇总'));
   lines.push(`  唯一技能 ${plan.summary.names} 个`);
   lines.push(`  移进中央 ${plan.summary.moves} 个｜已在中央 ${plan.summary.keepInCentral} 个`);
-  lines.push(`  建 junction ${plan.summary.createJunctions} 个｜原位替换为 junction ${plan.summary.replaceJunctions} 个`);
-  lines.push(`  跳过本地副本 ${plan.summary.skipLocal} 个｜同名内容不同 ${plan.summary.conflicts} 个`);
+  lines.push(`  建 junction ${plan.summary.createJunctions} 个｜原位替换为 junction ${plan.summary.replaceWithJunction} 个`);
+  lines.push(`  同名副本替换 ${plan.summary.replaceDuplicates} 个｜改名副本替换 ${plan.summary.replaceRenamed} 个｜待选择冲突 ${plan.summary.unresolvedConflicts} 个`);
   lines.push('');
 
   if (plan.summary.conflicts) {
-    lines.push(bold('冲突（保留更新版本，旧版标为 superseded）'));
+    lines.push(bold('冲突（CLI 默认整组跳过；请在桌面端明确选择正本）'));
     for (const item of plan.items.filter((i) => i.conflict)) {
-      lines.push(`  ! ${item.name}  (正本来自 ${item.canonical.platform})`);
+      lines.push(`  ! ${item.name}  (${item.blocked ? '未选择，不写入' : `正本来自 ${item.canonical.platform}`})`);
       for (const s of item.superseded) {
         lines.push(dim(`      旧版 ${s.platform} @ ${s.sourcePath}`));
       }
@@ -436,12 +438,20 @@ function renderUnifyPlan(plan) {
 
   lines.push(bold('逐技能动作'));
   for (const item of plan.items) {
-    const verb = item.centralAction === 'keep' ? '已在中央' : `移进中央 (来自 ${item.canonical.platform})`;
+    const verb = item.blocked
+      ? '冲突阻断，不执行写入'
+      : item.centralAction === 'keep' ? '已在中央' : `移进中央 (来自 ${item.canonical.platform})`;
     lines.push(`  · ${item.name}  ${dim(verb)}`);
+    const aliasNames = [...new Set(item.superseded.map((s) => s.name).filter((n) => n !== item.name))];
+    if (aliasNames.length) {
+      lines.push(`      ${dim(`改名副本并组：${aliasNames.join('、')}`)}`);
+    }
     for (const link of item.links) {
       const tag = link.action === 'create-junction' ? '建链接'
         : link.action === 'replace-with-junction' ? '原位换成链接'
-        : dim('保留本地');
+        : link.action === 'replace-duplicate' ? yellow('同名副本→备份后换成链接')
+        : link.action === 'replace-renamed' ? yellow('改名副本→备份后换成链接')
+        : dim('保留本地分叉');
       lines.push(`      ${dim(link.platform)} → ${tag}  ${dim(link.linkPath)}`);
     }
   }
@@ -452,14 +462,26 @@ function renderUnifyPlan(plan) {
 
 async function runUnify(options) {
   if (options.rollbackPath) {
-    const manifest = JSON.parse(await fs.readFile(path.resolve(options.rollbackPath), 'utf8'));
+    const manifestPath = path.resolve(options.rollbackPath);
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    const result = await scanRoots({ roots: DEFAULT_ROOTS, includeFiles: false });
+    const central = result.roots.find((root) => root.id === 'shared-agents');
+    if (!central) throw new Error('找不到中央目录');
+    validateUnifyManifest(manifest, {
+      centralDir: central.path,
+      manifestPath,
+      targetRoots: result.roots
+        .filter((root) => root.unifyTarget && root.unifyEligible !== false)
+        .map((root) => root.path)
+    });
     await rollbackUnify(manifest);
     process.stdout.write(`${green('已按 manifest 回滚：删除建的 junction，移动/备份内容已还原。')}\n`);
     return;
   }
 
   const result = await scanRoots({ roots: DEFAULT_ROOTS, includeFiles: false });
-  const plan = buildUnifyPlan(result);
+  const enriched = await enrichWithFingerprints(result);
+  const plan = buildUnifyPlan(enriched);
 
   if (options.apply) {
     const { manifestPath } = await applyUnify(plan);

@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld('skillPacker', {
   openSkillFile: (filePath) => ipcRenderer.invoke('path:open', filePath),
   revealSkillFile: (filePath) => ipcRenderer.invoke('path:reveal', filePath),
 
+  // 统一技能库：执行写 manifest（可回滚），回滚只接受主进程校验过的 manifest
+  unifyPreview: () => ipcRenderer.invoke('unify:preview'),
+  unifyApply: (payload) => ipcRenderer.invoke('unify:apply', payload),
+  unifyStatus: () => ipcRenderer.invoke('unify:status'),
+  unifyRollback: (manifestPath) => ipcRenderer.invoke('unify:rollback', manifestPath),
+
   // AI 整理：candidates / preview 不出网，advise 是唯一的出网点
   aiConfig: () => ipcRenderer.invoke('ai:config:read'),
   aiSetConfig: (patch) => ipcRenderer.invoke('ai:config:set', patch),

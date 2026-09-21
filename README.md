@@ -10,7 +10,7 @@
 
 | 入口 | 形态 | 适合谁 | 需要装什么 |
 |---|---|---|---|
-| **桌面应用** | Electron（C 通道，只读形态） | 日常使用：装一次，之后点一下就能扫 | 安装包 |
+| **桌面应用** | Electron（C 通道） | 日常使用：扫描、区分来源、统一个人 Skill | 安装包 |
 | **展示页 `/scan/`** | 网页 + File System Access | 先看看结果，不想装任何东西 | 不用装 |
 | **命令行 `bin/skill-packer.js`** | 单文件 Node 脚本（B 通道） | 自动化、CI、要链接清单 | 不用装（需 Node） |
 
@@ -28,14 +28,13 @@ npm run desktop:smoke      # 不弹窗自检：跑一遍真实扫描流水线，
 npm run dist               # 产出 Windows 安装包到 outputs/
 ~~~
 
-`desktop:smoke` 走与点击「重新扫描」完全相同的代码路径（设置 → 扫描内核 → 使用统计），
-把摘要打到 stdout（例如 `[smoke] {"ok":true,"skills":68,"roots":"3/6"}`），
-适合打包前后快速确认桌面端在这台机器上可用，也方便 CI 复现。
+`desktop:smoke` 会真实加载 Electron 页面与 preload，完成本机扫描，再进入「统一技能库」
+生成只读预览；它校验 Skill 卡片、扫描根、来源标签和操作清单，不会执行迁移。
 
 安装包命名 `Skill-Packer-Setup-<version>.exe`，同时提供 `GET /download/desktop` 供网页端直接下载。
 
 **从 GitHub Releases 下载**：每次推到 `main`，CI 会在 Windows Runner 上自动出一份 NSIS 安装包并挂到
-[Releases](https://github.com/gsyIsWatchingU/skill-packer/releases)，版本号形如 `2.2.0-beta.<run 号>`，
+[Releases](https://github.com/gsyIsWatchingU/skill-packer/releases)，版本号形如 `2.3.0-beta.<run 号>`，
 属于 prerelease。打开 Releases 页选最新一条，下载 `Skill-Packer-Setup-*.exe` 即可。
 
 **启动必须经 `npm run desktop`，不要直接 `electron .`。** 启动器
@@ -51,12 +50,19 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 注：打包产物**不受** `node_modules/electron` 遮蔽问题影响 —— electron-builder 会重命名主 exe，
 且 asar 内不含 `node_modules/electron`。该问题只存在于开发态，已由启动器解决。
 
-**当前版本只读。** 界面里明确写着这句话：不建链接、不改 `config.toml`、不删除任何文件，
-扫描结果只留在本机内存。写入与回滚（Diff 预览 + 一键回滚）在 M2 提供。
+默认扫描 11 个根，覆盖 Codex、Claude Code、Cursor、WorkBuddy、豆包和 Trae。
+系统内置 / 插件与个人 / 下载 Skill 分开标记；缺失根如实报 `missing`，不臆造目录。
 
-六个默认扫描根：Codex 个人 Skill 与插件缓存、跨 Agent 共享 Skill、
-WorkBuddy 个人 Skill，以及豆包的内置 Skill 与用户自定义 Skill（豆包在 `%LOCALAPPDATA%` 下）。
-缺失的根如实报 `missing`，不臆造。
+### 统一技能库
+
+「统一技能库」把个人 Skill 正本归入 `%USERPROFILE%\.agents\skills`，再在本机已存在的 IDE
+技能目录逐项创建 Junction。系统内置与插件 Skill 永远只读。
+
+- 第一次点击只生成计划，第二次确认才写盘；执行前会重新扫描，过期计划拒绝执行。
+- 同名同内容和仅改名副本会去重；同名不同内容默认阻断，必须明确选择正本。
+- 每一步写入 `.unify-backup/<时间>/manifest.json`；完成或中断后都可回滚。
+- 不修改 IDE 配置，不创建未安装 IDE 的目录，不把整个 `skills` 目录做链接。
+- Trae 当前只扫描；条目级链接兼容性验证通过前，不自动迁移其目录。
 
 安全基线：`contextIsolation` + `sandbox` + 无 `nodeIntegration`，
 本机能力只经 preload 白名单 IPC 暴露；不启本地 HTTP 服务。
@@ -99,7 +105,7 @@ WorkBuddy 个人 Skill，以及豆包的内置 Skill 与用户自定义 Skill（
 ## 命令行扫描（自动化与 CI）
 
 ~~~powershell
-npm run scan                                   # 扫描六个默认用户级目录
+npm run scan                                   # 扫描各 IDE 的 11 个默认根
 node bin/skill-packer.js scan .                  # 只扫描指定项目的 .agents/skills 与 .codex/skills
 node bin/skill-packer.js scan . --json out.json  # 同时输出机器可读报告
 node bin/skill-packer.js scan . --include-scripts
@@ -123,7 +129,7 @@ node bin/skill-packer.js scan . --no-follow-links  # 不跟随符号链接与 ju
 **口径是 `referenced`，不是 `invoked`。** 对全部 475 个真实会话日志抽样后确认：
 Codex 不把"技能被调用"记成工具调用，日志里引用 `SKILL.md` 的调用几乎全是 agent 在读/写
 `SKILL.md` 文件本身。所以这是弱代理指标，界面上如实标注为"被引用"，不能当使用频率看。
-真正可靠的 invoked 数据要等 Codex 侧显式上报，或 M2 落盘后由 Skill Packer 自己记录启用历史。
+真正可靠的 invoked 数据仍要等 IDE 显式上报；统一与回滚记录不等于调用记录。
 
 浏览器侧的两条扫描路径（首页授权目录、`/scan/` 展示页）走 File System Access API，
 该 API 看不到链接，因此**浏览器化简的结果可能与本机命令行不一致**。需要链接信息时用桌面版或命令行。
@@ -136,7 +142,7 @@ Codex 不把"技能被调用"记成工具调用，日志里引用 `SKILL.md` 的
 ~~~text
 Algorithm Lab 统一账号 API（保留 SSO + PKCE 兼容）
       ↓
-桌面应用（C 通道·只读） / 浏览器目录授权（A 通道） / CLI（B 通道） → Skill Packer Web
+桌面应用（C 通道；统一技能库可写） / 浏览器目录授权（A 通道） / CLI（B 通道） → Skill Packer Web
       ↓
 GPU PostgreSQL
 skill_users → skills → skill_versions → skill_files(BYTEA)
@@ -204,7 +210,7 @@ bash deploy/start.sh
 推送到 `main` 后，GitHub Actions 并行做两件事：
 
 1. **构建并发布桌面安装包**：在 `windows-latest` 上跑 `npm ci` + `electron-builder --win nsis`，
-   版本号自动挂上 CI run 号（如 `2.2.0-beta.42`），产物挂到
+   版本号自动挂上 CI run 号（如 `2.3.0-beta.42`），产物挂到
    [Releases](https://github.com/gsyIsWatchingU/skill-packer/releases)。
 2. **部署 Web 到 GPU**：在公共 Runner 上测试并生成发布包，再由标签为 `skill-atlas-gpu` 的 GPU 自托管
    Runner 下载发布包并完成：

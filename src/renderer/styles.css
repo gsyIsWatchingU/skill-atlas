@@ -753,6 +753,33 @@ button:disabled { cursor: default; opacity: 0.48; }
 
 .pill-plain { background: var(--pixel-page); border-color: var(--pixel-border-soft); }
 .pill-mono { font-family: var(--pixel-font); background: var(--pixel-page); }
+.pill-system { background: var(--pixel-warning-surface); border-color: var(--pixel-warning); }
+.pill-personal { background: var(--pixel-green-hover); border-color: var(--pixel-green); }
+
+.unify-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 2px solid var(--pixel-ink);
+  background: var(--pixel-page);
+}
+.unify-summary { margin: 0; font-size: 12px; font-weight: 700; line-height: 1.7; }
+.unify-conflicts, .unify-actions { display: flex; flex-direction: column; gap: 10px; }
+.unify-conflict, .unify-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  border: 2px solid var(--pixel-border-soft);
+  background: var(--pixel-surface);
+  font-size: 11px;
+}
+.unify-conflict { border-color: var(--pixel-warning); background: var(--pixel-warning-surface); }
+.unify-conflict select { width: 100%; padding: 7px 9px; border: 2px solid var(--pixel-ink); background: var(--pixel-surface); }
+.unify-details summary { cursor: pointer; font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+.unify-action-group ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.unify-action-group li { overflow-wrap: anywhere; color: var(--pixel-ink-secondary); font-family: var(--pixel-font); }
 
 .ai-reject {
   margin: 0;

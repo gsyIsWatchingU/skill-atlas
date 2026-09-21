@@ -185,9 +185,42 @@ usage_events(id, skill_id, event, at)   -- event: installed | activated | invoke
 落盘手段（按优先顺序）：
 
 1. **符号链接**：语义最正确，保留"唯一真源"。Windows 需开发者模式或管理员权限。
+   **必须逐条建链**（`skills/<name>` → 真源目录），不能把 `skills` 整个目录软链到别处：
+   Codex 对整段软链不生效（见 §6.1），Claude Code 只在条目级声明支持 symlink。
 2. **junction**：无特权要求，Node 将 junction 也报告为 symbolic link，Codex 同样跟随。作为降级方案。
 3. **复制**：**禁止**。会让项目里的 Skill 变成副本，破坏单一真源。
 4. **硬链接**：禁止。不跨盘、不支持目录。
+
+### 5.1 跨工具"公用"的正确形态
+
+不存在"所有工具都读的公共目录"——每个工具只扫自己的路径（Codex `.agents/skills` /
+`.codex/skills`，Claude Code `.claude/skills/`）。所以"一键公用"只能是
+**真源一份 + 向各工具目录逐条建链**；只有共同目录、没有各工具入口并不够。
+
+- **移动必须原位补链接**：裸移动（搬走后原位留空）禁止——原路径当场失效，项目环境标识
+  与环境记录全部错位。`src/unify.js` 的 `replace-with-junction` 是正确的形态：
+  正本搬进中央，**原位立刻建 junction 指回**，路径不失效。
+- **集中库是当前统一模式**：真源归置到 `shared-agents` 根，每一步都有备份与 manifest。
+- **一对多**：同一次落盘可以对多个工具各建一条链；同一真源被多处链接时，
+  Claude Code 只加载一次（§6.1），Codex 侧按各自路径各计一次，统计口径要分开记。
+
+### 5.2 现有实现与本机实测（2026-09-21）
+
+桌面应用与 B 通道 CLI 都已落地：桌面端两次确认，CLI 的 `unify` 默认只打计划，
+`--apply` 才动盘，`--rollback <manifest>` 还原；核心实现在 `src/unify.js`。
+
+- 中央根：`shared-agents`（`~/.agents/skills`）。适配器覆盖 Codex、Claude Code、Cursor、
+  WorkBuddy、豆包和 Trae；只对本机已存在且链接兼容性已验证的个人根建链，不创建缺失 IDE
+  目录。Trae 当前只扫描，不自动迁移。
+- 建链方式：`fs.symlink(target, linkPath, 'junction')`，**逐条建在 `<root>/<name>` 上**，
+  与 §5 的"禁止整段软链"一致。
+- 去重分两层：同名 + 内容指纹（frontmatter 的 `name:` 行归一化，可识别改名副本），
+  并查集合并成组；同名但内容不同 = 真冲突，默认整组阻断，用户明确选择正本后才备份替换。
+- 回滚：manifest 记录 moved / junctioned / removedDuplicates / backedUp；删链接用
+  `fs.rm(linkPath, { recursive: false })`——**非递归，不会穿透到真源**，这点必须保持。
+
+本机只读实测：扫描到系统 / 插件 Skill 184 个、个人 Skill 143 个；统一预览包含 43 组个人
+Skill、0 个系统项。开发态与打包产物均完成真实 Electron 页面、IPC 扫描和统一预览验收。
 
 停用全局技能使用原生机制，不删文件：
 
@@ -220,6 +253,21 @@ policy:
 | 停用 | `~/.codex/config.toml` 的 `[[skills.config]] enabled=false` | 停用不必删文件 |
 | 降噪 | `agents/openai.yaml` 的 `allow_implicit_invocation` | 存在"启用/停用"之间的中间态 |
 | 分发单元 | Skills 是创作格式，**Plugins 是分发单元** | 工作流包导出必须产出 Plugin 结构 |
+
+### 6.1 Claude Code 机制（设计依据）
+
+跨工具落盘必须同时满足两侧事实。以下核对自官方文档（2026-09-20），只记影响实现的部分：
+
+| 机制 | 事实 | 对方案的影响 |
+|---|---|---|
+| 发现路径 | `~/.claude/skills/`、项目 `.claude/skills/`、嵌套 `<subdir>/.claude/skills/`、`--add-dir` 目录、plugin `skills/`、企业托管目录、`~/.claude/skills/synced/` | **`.agents/skills` 对 Claude 不可见**，落盘必须写到 `.claude/skills/` |
+| 符号链接 | 条目级支持：`skills/<name>` 可为 symlink，跟随目标读 `SKILL.md`；多处指向同一目标只加载一次 | §5 的逐条建链成立；同一真源多处链接不会重复计数 |
+| 整段软链 | 官方只声明条目级；社区实测 Codex 整段软链 `~/.codex/skills` 完全不加载 | 落盘实现禁止整段链接，必须逐条 |
+| 嵌套目录 | 启动目录向上到仓库根逐级加载；更下级目录等首次读写该目录文件才加载 | 项目级落盘优先写到仓库根的 `.claude/skills/` |
+| 列表预算 | `skillListingBudgetFraction` 默认 0.01（上下文 1%）；单条 description+when_to_use 上限 1536 字符；溢出时**保留全部 name，从调用最少的开始丢 description** | 被丢的不能自动触发，只能手动 `/name`；落盘要给出占用估算 |
+| 同名冲突 | enterprise > personal > project > 内置，同名静默替换内置 Skill，无警告 | 落盘前必须查同名，冲突要在计划里显式列出 |
+| 停用 | 无等价的 `enabled=false`；可用 `disable-model-invocation`、`user-invocable`、`skillOverrides` 或插件启停 | "停用"在两侧不是同一个动作，环境模型要按工具分支 |
+| 云端会话 | Cowork / cloud 会话不读本机 `~/.claude/skills/`，只认账户同步与仓库内提交的 | 落盘结果对云端会话不保证生效，界面需如实说明 |
 
 ## 7 权限与信任模型
 
@@ -375,29 +423,27 @@ CLI 分发的三条硬要求：
 
 每期给出可验收的交付物，不做无法验证的里程碑。
 
-### M1 只读与体检 — 已完成
+### M1 扫描与体检 — 已完成
 
 交付：
-- **C 通道只读形态：Electron 桌面应用**（`src/main.js` + `src/preload.js` + `src/renderer/`），
+- **C 通道：Electron 桌面应用**（`src/main.js` + `src/preload.js` + `src/renderer/`），
   `contextIsolation` + `sandbox` + 无 `nodeIntegration`，全部本机能力经白名单 IPC。
-  当前只启用 read capability：不建链接、不改 `config.toml`、不删文件，扫描结果只留内存。
 - `bin/skill-packer.js`（B 通道 CLI）、`/scan/` 展示页（A 通道）、`/api/cli/info` 与 `/cli/skill-packer.js`。
 - **共享扫描内核** `src/scanner/index.js`，CLI 与桌面宿主共用，并用 `test/scanner.test.js` 兜住 §11.1 语义。
 
 验收：CLI 在无 Node 依赖的普通机器上可跑（仅需 Node）；报告含预算、重复、描述体检；展示页零安装可用；测试覆盖。
-桌面版可直接读取六个默认根，不需要下载脚本、不需要命令行、不需要每次选文件夹。
+桌面版可读取 11 个默认根，并区分系统 / 插件与个人 / 下载来源。
 
 待补：安装包接入真实签名与自动更新；CLI 发布到 npm 并带 provenance。
 
-### M2 项目环境（最短路径，建议下一步）
+### M2 统一技能库 — 已完成
 
-交付：项目目录探测（含项目级与仓库级作用域）、变更计划生成、预览界面、C 通道落盘、`apply_records` 与回滚。
+交付：IDE 适配器注册表、只读计划、系统项隔离、内容去重、冲突选择、逐 Skill Junction、
+执行前重扫校验、增量 manifest 与回滚。
 
-验收：能对一个真实项目执行"启用 3 个 Skill / 停用 1 个"，全程有 diff；失败可完整回滚；重复执行幂等。
+验收：110 项发布范围测试通过；开发态与打包产物的 Electron smoke 均能渲染真实扫描结果并生成统一预览。
 
-前置：缺陷 #1 已于 2026-09-16 修完并补了 7 项测试，此项已解除阻塞。
-C 通道宿主（桌面版）已在 M1 落地，M2 只需在其上新增 **write capability**：
-IPC 增加 `plan:apply` / `plan:rollback`，落盘前用 Diff 窗口确认，`apply_records` 记录可回滚快照。
+待继续：项目级启用 / 停用、按项目预算选择、幂等 apply 记录。
 
 ### M3 工作流包
 
@@ -431,7 +477,5 @@ IPC 增加 `plan:apply` / `plan:rollback`，落盘前用 Diff 窗口确认，`ap
 | # | 决策点 | 选项 | 我的倾向 |
 |---|---|---|---|
 | 1 | `project_key` 从哪来 | git remote + 相对路径 / 路径哈希 / 用户手填 | git remote 优先，退化到路径哈希 |
-| 2 | Windows 落盘手段 | 要求开发者模式用 symlink / 降级 junction | 优先 symlink，无权限时降级 junction 并提示 |
-| 3 | C 通道形态 | ~~扩展 + Native Messaging / 保留本地 HTTP 服务~~ **已定：本地可信宿主，桌面应用为首选载体，扩展 + Native Messaging 为备选**（2026-09-18） | 桌面应用（Windows 上唯一走得通的安装路径，且顺带消掉本地 HTTP 攻击面） |
-| 4 | 云端是否存二进制 | 继续存 BYTEA / 只存文本与哈希清单 | 只存文本与哈希清单（§7） |
-| 5 | 现有 helper 去留 | 收敛为宿主 / 直接废弃 | **已定（2026-09-18）**：扫描实现已抽到 `src/scanner/index.js` 并与桌面宿主共用；helper 收敛为 **B 通道 CLI 入口**，只服务自动化与 CI，不再是首页主引导 |
+| 2 | 项目级启用如何表达 | 项目内链接 / IDE 配置 / 二者结合 | 优先项目内链接，IDE 特例由适配器处理 |
+| 3 | 云端是否存二进制 | 继续存 BYTEA / 只存文本与哈希清单 | 只存文本与哈希清单（§7） |
