@@ -26,7 +26,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SOURCE = fs.readFileSync(
-  path.join(__dirname, '..', 'src', 'web-server.js'),
+  path.join(__dirname, '..', 'src', 'cloud-api.js'),
   'utf8'
 );
 

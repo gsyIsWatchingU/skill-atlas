@@ -13,16 +13,14 @@
     "skill-packer": "bin/skill-packer.js"
   },
   "scripts": {
-    "start": "node src/web-server.js",
-    "dev": "node --watch src/web-server.js",
-    "helper": "node src/web/helper/skill-packer-helper.js",
     "scan": "node bin/skill-packer.js scan",
     "desktop": "node scripts/desktop.js",
     "desktop:headless": "node scripts/desktop.js --headless",
     "desktop:smoke": "node scripts/desktop.js --smoke",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
-    "test": "node --test test/helper.test.js test/web-server.test.js test/dedup.test.js test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/schema-resilience.test.js test/unify.test.js test/ide-adapters.test.js test/ai-advisor.test.js"
+    "test": "node --test test/scanner.test.js test/usage-scanner.test.js test/desktop-settings.test.js test/unify.test.js test/ide-adapters.test.js test/ai-advisor.test.js test/cloud-api.test.js test/schema-resilience.test.js",
+    "cloud:api": "node src/cloud-api.js"
   },
   "engines": {
     "node": ">=20"

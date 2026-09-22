@@ -1,7 +1,0 @@
-node_modules
-outputs
-work
-data
-.git
-.env
-*.log

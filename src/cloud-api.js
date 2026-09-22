@@ -16,18 +16,8 @@ const MAX_PACKAGE_FILES = 1000;
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const SESSION_COOKIE = 'skill_atlas_session';
 const SSO_STATE_COOKIE = 'skill_atlas_sso_state';
-const WEB_ROOT = path.join(__dirname, 'web');
-const ASSET_ROOT = path.join(__dirname, '..', 'assets');
 const CLI_SCRIPT_PATH = path.join(__dirname, '..', 'bin', 'skill-packer.js');
 const DESKTOP_OUTPUT_DIR = path.join(__dirname, '..', 'outputs');
-const CONTENT_TYPES = {
-  '.css': 'text/css; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml'
-};
 
 function json(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -816,53 +806,6 @@ function hashFile(filePath) {
   });
 }
 
-async function serveStatic(response, pathname) {
-  // 品牌图标走 assets/ 而不是 web/：桌面端与网页端共用同一份图标资产
-  const brandIcon = pathname === '/icon.svg'
-    ? 'icon.svg'
-    : pathname === '/icon.png'
-      ? 'icon.png'
-      : '';
-  const root = brandIcon ? ASSET_ROOT : WEB_ROOT;
-  const relative = pathname === '/' ? 'index.html' : brandIcon || decodeURIComponent(pathname).replace(/^\/+/, '');
-  const resolvedRoot = path.resolve(root);
-  let resolved = path.resolve(root, relative);
-  if (!resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
-    json(response, 404, { error: '页面不存在' });
-    return;
-  }
-  try {
-    let content;
-    try {
-      content = await fs.readFile(resolved);
-    } catch (error) {
-      // /scan 与 /scan/ 都回退到该目录下的 index.html。
-      const isDirectoryRequest = error.code === 'EISDIR' || (error.code === 'ENOENT' && !path.extname(relative));
-      if (!isDirectoryRequest) throw error;
-      resolved = path.resolve(root, relative, 'index.html');
-      if (!resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
-        json(response, 404, { error: '页面不存在' });
-        return;
-      }
-      content = await fs.readFile(resolved);
-    }
-    response.writeHead(200, {
-      'Content-Type': CONTENT_TYPES[path.extname(resolved)] || 'application/octet-stream',
-      'Cache-Control': path.extname(resolved) === '.html' ? 'no-cache' : 'public, max-age=300',
-      'Content-Security-Policy': "default-src 'self'; connect-src 'self' http://127.0.0.1:18787 http://localhost:18787; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer'
-    });
-    response.end(content);
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'EISDIR') {
-      json(response, 404, { error: '页面不存在' });
-      return;
-    }
-    throw error;
-  }
-}
-
 function redirect(response, location) {
   response.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });
   response.end();
@@ -1237,7 +1180,7 @@ function createSkillAtlasServer(options = {}) {
         json(response, 405, { error: '请求方法不支持' });
         return;
       }
-      await serveStatic(response, url.pathname);
+      json(response, 410, { error: 'Web 端已停用，请使用 Skill Packer 桌面端；云同步服务继续提供。', code: 'WEB_RETIRED' });
     } catch (error) {
       const statusCode = error.statusCode || 500;
       if (statusCode >= 500) console.error(error);
@@ -1255,7 +1198,7 @@ if (require.main === module) {
   server.repository.health()
     .then(() => {
       server.listen(port, host, () => {
-        console.log(`Skill Packer Web 已启动：http://${host}:${port}`);
+        console.log(`Skill Packer 云同步 API 已启动：http://${host}:${port}`);
       });
     })
     .catch((error) => {

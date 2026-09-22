@@ -1,4 +1,4 @@
-name: CI/CD
+name: 桌面端构建与发布
 
 on:
   push:
@@ -43,103 +43,14 @@ jobs:
       - name: 检查语法
         run: |
           node --check src/main.js
+          node --check src/cloud-api.js
           node --check src/preload.js
           node --check src/settings.js
           node --check src/usage-scanner.js
           node --check src/scanner/index.js
           node --check src/renderer/app.js
           node --check scripts/desktop.js
-          node --check src/web-server.js
-          node --check src/web/app.js
-          node --check src/web/helper/skill-packer-helper.js
-          node --check src/web/scan/scan.js
           node --check bin/skill-packer.js
-
-      - name: 检查部署脚本语法
-        run: |
-          bash -n deploy/apply-release.sh
-          bash -n deploy/verify-public.sh
-          bash -n deploy/start.sh
-          bash -n deploy/backup-database.sh
-          bash -n deploy/init-gpu-database.sh
-
-      - name: 生成部署包
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/skill-packer-${GITHUB_SHA}.tar.gz"
-          trap 'rm -f .deploy-manifest' EXIT
-          git ls-files > .deploy-manifest
-          tar --verbatim-files-from -czf "$archive" -T .deploy-manifest .deploy-manifest
-
-      - name: 上传部署包
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: skill-packer-${{ github.sha }}
-          path: ${{ runner.temp }}/skill-packer-${{ github.sha }}.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy:
-    name: 部署到 GPU 公网
-    needs: quality
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, Linux, X64, skill-atlas-gpu]
-    timeout-minutes: 20
-    env:
-      DEPLOY_PATH: /workspace/projects/skill-atlas
-
-    steps:
-      - name: 下载部署包
-        uses: actions/download-artifact@v4
-        with:
-          name: skill-packer-${{ github.sha }}
-          path: ${{ runner.temp }}/skill-packer-release
-
-      - name: 发布并验证
-        id: release
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/skill-packer-release/skill-packer-${GITHUB_SHA}.tar.gz"
-          release_dir="$DEPLOY_PATH/.deploy-tmp/release-${GITHUB_SHA}"
-          [[ "$DEPLOY_PATH" == "/workspace/projects/skill-atlas" ]]
-          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$release_dir" == "$DEPLOY_PATH/.deploy-tmp/release-$GITHUB_SHA" ]]
-          test -f "$archive"
-          test -f "$DEPLOY_PATH/.env"
-
-          mkdir -p "$DEPLOY_PATH/.deploy-tmp"
-          rm -rf -- "$release_dir"
-          mkdir -p "$release_dir"
-          trap 'rm -rf -- "$release_dir"' EXIT
-          tar -xzf "$archive" -C "$release_dir"
-          bash "$release_dir/deploy/apply-release.sh" "$release_dir" "$DEPLOY_PATH" "$GITHUB_SHA"
-
-      # 部署失败时把分段计时日志上传成 artifact。
-      # 起因：失败只报「发布并验证」，GitHub 的 job 日志接口匿名访问返回 403，
-      # 拿不到具体卡在哪一段，只能靠猜。这段日志会记录每个阶段的耗时、
-      # npm ci 装了多少包、supervisor 状态序列、以及验证失败的具体字段。
-      - name: 收集部署诊断日志
-        if: failure()
-        shell: bash
-        run: |
-          set -uo pipefail
-          mkdir -p "$RUNNER_TEMP/deploy-diag"
-          find "$DEPLOY_PATH/run" -maxdepth 1 -name 'deploy-*.log' -newermt '-30 minutes' \
-            -exec cp -v {} "$RUNNER_TEMP/deploy-diag/" \; 2>/dev/null || true
-          ls -la "$RUNNER_TEMP/deploy-diag" || true
-
-      - name: 上传部署诊断日志
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-diag-${{ github.sha }}
-          path: ${{ runner.temp }}/deploy-diag/
-          if-no-files-found: warn
-          retention-days: 7
 
   desktop-release:
     name: 构建并发布 Windows 安装包
