@@ -22,8 +22,8 @@ const state = {
   scan: null,
   pendingScrollY: 0,
   cloudUser: null,
-  cloudTab: 'mine',
   cloudSkills: [],
+  communitySkills: [],
   ai: { config: null, candidates: null, preview: null, advice: null },
   unify: { preview: null, lastManifest: null }
 };
@@ -177,14 +177,17 @@ function updateCounts() {
     workbuddy: skills.filter((s) => s.platform === 'workbuddy').length,
     shared: skills.filter((s) => s.platform === 'shared').length,
     duplicate: 0,
-    unused: skills.filter((s) => !(s.usage && s.usage.total > 0)).length
+    unused: skills.filter((s) => !(s.usage && s.usage.total > 0)).length,
+    community: state.communitySkills.length,
+    cloud: state.cloudSkills.length
   };
   const duplicates = duplicateNames();
   counts.duplicate = skills.filter((s) => duplicates.has(String(s.name || '').trim().toLocaleLowerCase('en-US'))).length;
 
   for (const node of document.querySelectorAll('.nav-count')) {
     const key = node.getAttribute('data-count');
-    node.textContent = String(counts[key] || 0);
+    const needsLogin = key === 'community' || key === 'cloud';
+    node.textContent = needsLogin && !state.cloudUser ? '—' : String(counts[key] || 0);
   }
 
   $('metric-skills').textContent = String(skills.length);
@@ -459,9 +462,10 @@ function setView(view) {
   $('view-usage').hidden = view !== 'usage';
   $('view-ai').hidden = view !== 'ai';
   $('view-unify').hidden = view !== 'unify';
+  $('view-community').hidden = view !== 'community';
   $('view-cloud').hidden = view !== 'cloud';
   for (const node of document.querySelectorAll('.nav-item')) {
-    // 没有 data-scope 的入口（AI 整理 / 云同步）只比视图名，
+    // 没有 data-scope 的入口（AI 整理 / Skill 社区 / 云同步）只比视图名，
     // 否则它们会永远选不中 —— 这类 bug 表现为「点了没反应」
     const scoped = node.hasAttribute('data-scope');
     const active = node.getAttribute('data-view') === view
@@ -581,16 +585,19 @@ function collectUnifyConflictChoices() {
   return choices;
 }
 
-/* ---------------- 云同步 ---------------- */
+/* ---------------- Skill 社区 / 云同步 ---------------- */
 
-function renderCloudAccount() {
+function renderCloudAccounts() {
   const user = state.cloudUser;
-  $('cloud-user-label').textContent = user ? `${user.displayName || user.email || '已登录'}（${user.email || ''}）` : '未登录';
-  $('cloud-logout').hidden = !user;
-  $('cloud-login-form').hidden = Boolean(user);
+  const label = user ? `${user.displayName || user.email || '已登录'}（${user.email || ''}）` : '未登录';
+  for (const prefix of ['community', 'cloud']) {
+    $(`${prefix}-user-label`).textContent = label;
+    $(`${prefix}-logout`).hidden = !user;
+    $(`${prefix}-login-form`).hidden = Boolean(user);
+  }
 }
 
-function createCloudCard(item) {
+function createCloudCard(item, scope) {
   const card = document.createElement('div');
   card.className = 'skill-card';
 
@@ -646,7 +653,7 @@ function createCloudCard(item) {
   });
   actions.append(download);
 
-  if (state.cloudTab === 'mine') {
+  if (scope === 'mine') {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'ghost-button';
@@ -657,7 +664,7 @@ function createCloudCard(item) {
           id: item.id,
           visibility: item.visibility === 'community' ? 'private' : 'community'
         });
-        await loadCloud();
+        await Promise.all([loadCommunity(), loadCloud()]);
         showToast('已更新可见性');
       } catch (error) {
         showToast(`更新失败：${error.message || error}`);
@@ -669,41 +676,99 @@ function createCloudCard(item) {
   return card;
 }
 
-function renderCloud() {
-  renderCloudAccount();
-  $('cloud-tab-mine').classList.toggle('is-active', state.cloudTab === 'mine');
-  $('cloud-tab-community').classList.toggle('is-active', state.cloudTab === 'community');
-
-  const grid = $('cloud-grid');
+function renderCloudModule(scope) {
+  renderCloudAccounts();
+  const isCommunity = scope === 'community';
+  const prefix = isCommunity ? 'community' : 'cloud';
+  const items = isCommunity ? state.communitySkills : state.cloudSkills;
+  const grid = $(`${prefix}-grid`);
   grid.textContent = '';
-  const items = state.cloudSkills || [];
-  $('cloud-empty').hidden = items.length > 0;
+  $(`${prefix}-empty`).hidden = items.length > 0;
 
   if (!state.cloudUser) {
-    $('cloud-hint').textContent = '用统一账号登录后，跨机查看并下载你的 Skill。';
-    $('cloud-empty').hidden = true;
+    $(`${prefix}-hint`).textContent = isCommunity
+      ? '用统一账号登录后浏览和下载社区 Skill。'
+      : '用统一账号登录后，在不同设备间同步自己的 Skill。';
+    $(`${prefix}-empty`).hidden = true;
     return;
   }
-  $('cloud-hint').textContent = state.cloudTab === 'mine'
-    ? `我的 Skill · 共 ${items.length} 个`
-    : `Skill 社区 · 共 ${items.length} 个`;
-  items.forEach((item) => grid.append(createCloudCard(item)));
+  $(`${prefix}-hint`).textContent = isCommunity
+    ? `Skill 社区 · 共 ${items.length} 个`
+    : `我的云端 Skill · 共 ${items.length} 个`;
+  items.forEach((item) => grid.append(createCloudCard(item, scope)));
+}
+
+function renderCommunity() {
+  renderCloudModule('community');
+}
+
+function renderCloud() {
+  renderCloudModule('mine');
+}
+
+async function loadCloudScope(scope) {
+  const isCommunity = scope === 'community';
+  const prefix = isCommunity ? 'community' : 'cloud';
+  if (!state.cloudUser) {
+    if (isCommunity) state.communitySkills = [];
+    else state.cloudSkills = [];
+    isCommunity ? renderCommunity() : renderCloud();
+    updateCounts();
+    return;
+  }
+  $(`${prefix}-hint`).textContent = '正在加载…';
+  try {
+    const items = await window.skillPacker.cloudList(scope);
+    if (isCommunity) state.communitySkills = items;
+    else state.cloudSkills = items;
+  } catch (error) {
+    if (isCommunity) state.communitySkills = [];
+    else state.cloudSkills = [];
+    showToast(`加载${isCommunity ? '社区' : '云端'}失败：${error.message || error}`);
+  }
+  isCommunity ? renderCommunity() : renderCloud();
+  updateCounts();
+}
+
+async function loadCommunity() {
+  return loadCloudScope('community');
 }
 
 async function loadCloud() {
-  if (!state.cloudUser) {
-    state.cloudSkills = [];
-    renderCloud();
-    return;
-  }
-  $('cloud-hint').textContent = '正在加载…';
+  return loadCloudScope('mine');
+}
+
+async function submitCloudLogin(prefix) {
+  const button = $(`${prefix}-login`);
+  button.disabled = true;
+  button.textContent = '登录中…';
   try {
-    state.cloudSkills = await window.skillPacker.cloudList(state.cloudTab);
+    const result = await window.skillPacker.cloudLogin({
+      email: $(`${prefix}-email`).value.trim(),
+      password: $(`${prefix}-password`).value
+    });
+    state.cloudUser = result.user;
+    $('community-password').value = '';
+    $('cloud-password').value = '';
+    await Promise.all([loadCommunity(), loadCloud()]);
+    showToast('登录成功');
   } catch (error) {
-    state.cloudSkills = [];
-    showToast(`加载云端失败：${error.message || error}`);
+    showToast(`登录失败：${error.message || error}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = '登录';
   }
+}
+
+async function logoutCloudAccount() {
+  await window.skillPacker.cloudLogout();
+  state.cloudUser = null;
+  state.cloudSkills = [];
+  state.communitySkills = [];
+  renderCommunity();
   renderCloud();
+  updateCounts();
+  showToast('已退出登录');
 }
 
 /* ---------------- AI 整理 ---------------- */
@@ -1131,9 +1196,10 @@ function render() {
   renderScopeOptions();
   renderCatalog();
   renderUsageDashboard();
+  renderCommunity();
   renderCloud();
   renderAi();
-  setView(['catalog', 'usage', 'ai', 'unify', 'cloud'].includes(state.view) ? state.view : 'catalog');
+  setView(['catalog', 'usage', 'ai', 'unify', 'community', 'cloud'].includes(state.view) ? state.view : 'catalog');
 }
 
 async function scan() {
@@ -1160,10 +1226,12 @@ function bindEvents() {
   for (const node of document.querySelectorAll('.nav-item')) {
     node.addEventListener('click', () => {
       const view = node.getAttribute('data-view');
-      // 只有目录视图才有范围概念；AI 整理 / 云同步点进去不该把 scope 清成 null
+      // 只有目录视图才有范围概念；独立模块不该把 scope 清成 null
       if (view === 'catalog') state.scope = node.getAttribute('data-scope');
       setView(view);
       renderCatalog();
+      if (view === 'community') void loadCommunity();
+      if (view === 'cloud') void loadCloud();
       saveUiState();
     });
   }
@@ -1458,53 +1526,24 @@ function bindEvents() {
     }
   });
 
+  $('community-login-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await submitCloudLogin('community');
+  });
   $('cloud-login-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const button = $('cloud-login');
-    button.disabled = true;
-    button.textContent = '登录中…';
-    try {
-      const result = await window.skillPacker.cloudLogin({
-        email: $('cloud-email').value.trim(),
-        password: $('cloud-password').value
-      });
-      state.cloudUser = result.user;
-      $('cloud-password').value = '';
-      await loadCloud();
-      showToast('登录成功');
-    } catch (error) {
-      showToast(`登录失败：${error.message || error}`);
-    } finally {
-      button.disabled = false;
-      button.textContent = '登录';
-    }
+    await submitCloudLogin('cloud');
   });
-
-  $('cloud-logout').addEventListener('click', async () => {
-    await window.skillPacker.cloudLogout();
-    state.cloudUser = null;
-    state.cloudSkills = [];
-    renderCloud();
-    showToast('已退出登录');
-  });
-
-  $('cloud-tab-mine').addEventListener('click', async () => {
-    state.cloudTab = 'mine';
-    await loadCloud();
-  });
-
-  $('cloud-tab-community').addEventListener('click', async () => {
-    state.cloudTab = 'community';
-    await loadCloud();
-  });
-
+  $('community-logout').addEventListener('click', logoutCloudAccount);
+  $('cloud-logout').addEventListener('click', logoutCloudAccount);
+  $('community-refresh').addEventListener('click', async () => { await loadCommunity(); });
   $('cloud-refresh').addEventListener('click', async () => { await loadCloud(); });
 
   $('upload-cloud').addEventListener('click', async () => {
     const skill = currentSelected();
     if (!skill) return;
     if (!state.cloudUser) {
-      showToast('请先在「云同步」页登录');
+      showToast('请先在「云同步」或「Skill 社区」登录');
       return;
     }
     try {
@@ -1571,6 +1610,8 @@ async function boot() {
   } catch { /* 没有历史统一记录 */ }
   await scan();
   render();
+  if (state.view === 'community') await loadCommunity();
+  if (state.view === 'cloud') await loadCloud();
 }
 
 boot();

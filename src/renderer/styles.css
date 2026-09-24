@@ -614,6 +614,8 @@ button:disabled { cursor: default; opacity: 0.48; }
 .pill-community { background: var(--pixel-green-hover); border-color: var(--pixel-green); }
 .pill-private { background: #e8e8ee; border-color: #b6b6c4; }
 .cloud-panel { display: flex; flex-direction: column; gap: 14px; }
+.cloud-module-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.cloud-module-head .panel-note { margin-bottom: 0; }
 .cloud-account { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .cloud-user { font-weight: 600; }
 .cloud-login { display: flex; gap: 8px; flex-wrap: wrap; }

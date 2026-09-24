@@ -58,6 +58,9 @@
         <button class="nav-item" data-view="unify" type="button">
           <span>统一技能库</span>
         </button>
+        <button class="nav-item" data-view="community" type="button">
+          <span>Skill 社区</span><span class="nav-count" data-count="community">—</span>
+        </button>
         <button class="nav-item" data-view="cloud" type="button">
           <span>云同步</span><span class="nav-count" data-count="cloud">—</span>
         </button>
@@ -247,8 +250,42 @@
         </div>
       </section>
 
+      <section id="view-community" class="view" hidden>
+        <div class="panel cloud-panel">
+          <div class="cloud-module-head">
+            <div>
+              <h2 class="panel-title">Skill 社区</h2>
+              <p class="panel-note">浏览其他用户公开发布的 Skill，按需下载到统一技能库。</p>
+            </div>
+          </div>
+          <div class="cloud-account" id="community-account">
+            <span id="community-user-label" class="cloud-user">未登录</span>
+            <button id="community-logout" class="ghost-button" type="button" hidden>退出登录</button>
+          </div>
+
+          <form id="community-login-form" class="cloud-login" hidden>
+            <input id="community-email" type="email" placeholder="邮箱" autocomplete="username">
+            <input id="community-password" type="password" placeholder="密码" autocomplete="current-password">
+            <button id="community-login" class="primary-button" type="submit">登录</button>
+          </form>
+
+          <div class="cloud-tabs">
+            <button id="community-refresh" class="ghost-button" type="button">刷新社区</button>
+          </div>
+          <p class="catalog-hint" id="community-hint">登录后浏览 Skill 社区。</p>
+          <div class="skill-grid" id="community-grid"></div>
+          <p class="empty" id="community-empty" hidden>社区里暂时没有公开 Skill。</p>
+        </div>
+      </section>
+
       <section id="view-cloud" class="view" hidden>
         <div class="panel cloud-panel">
+          <div class="cloud-module-head">
+            <div>
+              <h2 class="panel-title">云同步</h2>
+              <p class="panel-note">管理自己的云端 Skill，在不同设备间推送与下载。</p>
+            </div>
+          </div>
           <div class="cloud-account" id="cloud-account">
             <span id="cloud-user-label" class="cloud-user">未登录</span>
             <button id="cloud-logout" class="ghost-button" type="button" hidden>退出登录</button>
@@ -261,13 +298,11 @@
           </form>
 
           <div class="cloud-tabs">
-            <button id="cloud-tab-mine" class="ghost-button is-active" type="button">我的 Skill</button>
-            <button id="cloud-tab-community" class="ghost-button" type="button">Skill 社区</button>
             <button id="cloud-refresh" class="ghost-button" type="button">刷新</button>
           </div>
-          <p class="catalog-hint" id="cloud-hint">登录后查看云端。</p>
+          <p class="catalog-hint" id="cloud-hint">登录后查看自己的云端 Skill。</p>
           <div class="skill-grid" id="cloud-grid"></div>
-          <p class="empty" id="cloud-empty" hidden>这里还没有 Skill。在本机点开某个 Skill，选「上传到云端」。</p>
+          <p class="empty" id="cloud-empty" hidden>云端还没有 Skill。在本机点开某个 Skill，选择「上传到云端」。</p>
         </div>
       </section>
     </main>
