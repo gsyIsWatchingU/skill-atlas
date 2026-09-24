@@ -63,6 +63,22 @@ npm run dist               # 产出 Windows 安装包到 outputs/
 - 不修改 IDE 配置，不创建未安装 IDE 的目录，不把整个 `skills` 目录做链接。
 - Trae 当前只扫描；条目级链接兼容性验证通过前，不自动迁移其目录。
 
+### 业务流组装
+
+桌面端「业务流」把多个 Skill 组合成一个可直接调用的入口 Skill。业务流只保存 Skill 引用、
+版本哈希、顺序关系与补充指令，不复制子 Skill 内容：`ABCD` 与 `CDEF` 可以复用同一份 `C / D`。
+
+- 支持接着执行、与上一步并行、按需执行三种组合关系。
+- 点击「生成单一调用入口」后，在中央目录生成 `$workflow-名称`。
+- 用户只调用这一个入口，Agent 自动加载各子 Skill，无需逐个选择。
+- 子 Skill 版本变化时拒绝静默覆盖，需要重新保存业务流后再生成。
+- 删除业务流只删除它生成的入口，不删除任何子 Skill。
+- 可选择项目与 Codex / Claude Code / Cursor，先预览再逐项建立 Junction。
+- 项目内同名普通目录默认阻断；每次启用写 manifest，并可回滚本次创建的链接。
+- 可导出 / 导入 `.skill-workflow.json`；包内不含本机路径和 Skill 正文，导入时校验依赖与版本。
+- 可导出 Codex 原生 Plugin 目录，包含 `.codex-plugin/plugin.json`、入口与依赖 Skill 固定版本快照。
+- 登录后可把业务流保存到云端并在其他设备拉取；云端按账号隔离并保留版本记录。
+
 安全基线：`contextIsolation` + `sandbox` + 无 `nodeIntegration`，
 本机能力只经 preload 白名单 IPC 暴露；不启本地 HTTP 服务。
 除「云同步」与「AI 整理」这两个用户显式开启的动作外，不联网上传任何内容。

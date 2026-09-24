@@ -9,6 +9,7 @@ const {
   timingSafeEqual
 } = require('node:crypto');
 const { Pool } = require('pg');
+const workflows = require('./workflows');
 
 const MAX_REQUEST_BYTES = 28 * 1024 * 1024;
 const MAX_PACKAGE_BYTES = 20 * 1024 * 1024;
@@ -131,6 +132,23 @@ function validateVisibility(value) {
     throw httpError('可见性必须是私有或社区', 400);
   }
   return value;
+}
+
+function validateWorkflowCloudPackage(input) {
+  const workflowPackage = workflows.validateWorkflowPackage(input && input.workflowPackage);
+  const versionHash = workflows.workflowPackageHash(workflowPackage);
+  const workflow = workflowPackage.workflow;
+  return {
+    package: workflowPackage,
+    metadata: {
+      name: workflow.name,
+      purpose: workflow.purpose,
+      entrySkillName: workflow.entrySkillName,
+      versionHash,
+      stepCount: workflow.steps.length,
+      updatedAt: new Date().toISOString()
+    }
+  };
 }
 
 // 中文简介：仅作为 Skill 的数据库侧元数据生成与存储，绝不写回源文件。
@@ -379,7 +397,28 @@ function createPgRepository(databaseUrl) {
     'CREATE INDEX IF NOT EXISTS skill_sessions_expires_at_idx ON skill_sessions(expires_at);',
     'CREATE INDEX IF NOT EXISTS skill_sso_login_states_expires_at_idx ON skill_sso_login_states(expires_at);',
     'CREATE INDEX IF NOT EXISTS skill_versions_created_at_idx',
-    '  ON skill_versions(created_at DESC);'
+    '  ON skill_versions(created_at DESC);',
+    'CREATE TABLE IF NOT EXISTS workflow_packs (',
+    '  id TEXT PRIMARY KEY,',
+    '  normalized_name TEXT NOT NULL,',
+    '  name TEXT NOT NULL,',
+    '  purpose TEXT NOT NULL DEFAULT \'\',',
+    '  entry_skill_name TEXT NOT NULL,',
+    '  owner_id TEXT NOT NULL REFERENCES skill_users(id) ON DELETE CASCADE,',
+    '  latest_version_hash CHAR(64) NOT NULL,',
+    '  updated_at TIMESTAMPTZ NOT NULL',
+    ');',
+    'CREATE TABLE IF NOT EXISTS workflow_pack_versions (',
+    '  workflow_id TEXT NOT NULL REFERENCES workflow_packs(id) ON DELETE CASCADE,',
+    '  version_hash CHAR(64) NOT NULL,',
+    '  package_json JSONB NOT NULL,',
+    '  created_at TIMESTAMPTZ NOT NULL,',
+    '  PRIMARY KEY (workflow_id, version_hash)',
+    ');',
+    'CREATE UNIQUE INDEX IF NOT EXISTS workflow_packs_owner_name_idx',
+    '  ON workflow_packs(owner_id, normalized_name);',
+    'CREATE INDEX IF NOT EXISTS workflow_packs_updated_at_idx',
+    '  ON workflow_packs(owner_id, updated_at DESC);'
   ];
 
   // 数组元素是**行片段**，不是完整语句：一条 CREATE TABLE 会跨多个元素。
@@ -712,6 +751,109 @@ function createPgRepository(databaseUrl) {
     return result.rowCount > 0;
   }
 
+  async function listWorkflows(userId) {
+    await ready();
+    const result = await pool.query([
+      'SELECT w.*,',
+      '  (SELECT COUNT(*) FROM workflow_pack_versions versions',
+      '   WHERE versions.workflow_id = w.id)::INTEGER AS version_count,',
+      '  jsonb_array_length(v.package_json->\'workflow\'->\'steps\') AS step_count',
+      'FROM workflow_packs w',
+      'JOIN workflow_pack_versions v ON v.workflow_id = w.id',
+      '  AND v.version_hash = w.latest_version_hash',
+      'WHERE w.owner_id = $1',
+      'ORDER BY w.updated_at DESC, w.name'
+    ].join('\n'), [userId]);
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      purpose: row.purpose,
+      entrySkillName: row.entry_skill_name,
+      versionHash: row.latest_version_hash.trim(),
+      versionCount: Number(row.version_count),
+      stepCount: Number(row.step_count),
+      updatedAt: new Date(row.updated_at).toISOString()
+    }));
+  }
+
+  async function saveWorkflow(user, validated) {
+    await ready();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const metadata = validated.metadata;
+      const normalizedName = metadata.name.normalize('NFKC').toLocaleLowerCase('en-US');
+      const existing = await client.query(
+        'SELECT id FROM workflow_packs WHERE owner_id = $1 AND normalized_name = $2 FOR UPDATE',
+        [user.id, normalizedName]
+      );
+      const id = existing.rows[0]?.id || `workflow-${createHash('sha256')
+        .update(`${user.id}\0${normalizedName}`)
+        .digest('hex').slice(0, 16)}`;
+      await client.query([
+        'INSERT INTO workflow_packs',
+        '  (id, normalized_name, name, purpose, entry_skill_name, owner_id, latest_version_hash, updated_at)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        'ON CONFLICT (id) DO UPDATE SET',
+        '  name = EXCLUDED.name,',
+        '  purpose = EXCLUDED.purpose,',
+        '  entry_skill_name = EXCLUDED.entry_skill_name,',
+        '  latest_version_hash = EXCLUDED.latest_version_hash,',
+        '  updated_at = EXCLUDED.updated_at'
+      ].join('\n'), [
+        id,
+        normalizedName,
+        metadata.name,
+        metadata.purpose,
+        metadata.entrySkillName,
+        user.id,
+        metadata.versionHash,
+        metadata.updatedAt
+      ]);
+      await client.query([
+        'INSERT INTO workflow_pack_versions (workflow_id, version_hash, package_json, created_at)',
+        'VALUES ($1, $2, $3::jsonb, $4)',
+        'ON CONFLICT (workflow_id, version_hash) DO NOTHING'
+      ].join('\n'), [id, metadata.versionHash, JSON.stringify(validated.package), metadata.updatedAt]);
+      await client.query('COMMIT');
+      const all = await listWorkflows(user.id);
+      return all.find((item) => item.id === id);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function getWorkflow(id, userId) {
+    await ready();
+    const result = await pool.query([
+      'SELECT w.id, w.latest_version_hash, w.updated_at, v.package_json',
+      'FROM workflow_packs w',
+      'JOIN workflow_pack_versions v ON v.workflow_id = w.id',
+      '  AND v.version_hash = w.latest_version_hash',
+      'WHERE w.id = $1 AND w.owner_id = $2'
+    ].join('\n'), [id, userId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      versionHash: row.latest_version_hash.trim(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+      workflowPackage: row.package_json
+    };
+  }
+
+  async function removeWorkflow(id, userId) {
+    await ready();
+    const result = await pool.query(
+      'DELETE FROM workflow_packs WHERE id = $1 AND owner_id = $2',
+      [id, userId]
+    );
+    return result.rowCount > 0;
+  }
+
   async function close() {
     await pool.end();
   }
@@ -728,8 +870,12 @@ function createPgRepository(databaseUrl) {
     health,
     listCommunity,
     listMine,
+    listWorkflows,
     remove,
+    removeWorkflow,
     save,
+    saveWorkflow,
+    getWorkflow,
     updateVisibility,
     upsertSsoUser
   };
@@ -1053,6 +1199,47 @@ function createSkillAtlasServer(options = {}) {
         return;
       }
 
+      if (url.pathname === '/api/workflows' && request.method === 'GET') {
+        const user = await requireUser(request);
+        json(response, 200, { workflows: await repository.listWorkflows(user.id) });
+        return;
+      }
+
+      if (url.pathname === '/api/workflows' && request.method === 'POST') {
+        ensureSameOrigin(request);
+        const user = await requireUser(request);
+        const input = await readJsonBody(request);
+        let validated;
+        try {
+          validated = validateWorkflowCloudPackage(input);
+        } catch (error) {
+          error.statusCode = error.statusCode || 400;
+          throw error;
+        }
+        json(response, 201, { workflow: await repository.saveWorkflow(user, validated) });
+        return;
+      }
+
+      const workflowMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)$/);
+      if (workflowMatch) {
+        const user = await requireUser(request);
+        const workflowId = decodeURIComponent(workflowMatch[1]);
+        if (request.method === 'GET') {
+          const workflowPackage = await repository.getWorkflow(workflowId, user.id);
+          if (!workflowPackage) throw httpError('业务流不存在或无权访问', 404);
+          json(response, 200, workflowPackage);
+          return;
+        }
+        if (request.method === 'DELETE') {
+          ensureSameOrigin(request);
+          if (!await repository.removeWorkflow(workflowId, user.id)) {
+            throw httpError('业务流不存在或无权操作', 404);
+          }
+          json(response, 200, { ok: true });
+          return;
+        }
+      }
+
       if (url.pathname === '/api/skills' && request.method === 'GET') {
         const scope = url.searchParams.get('scope') || 'community';
         const user = await getRequestUser(request);
@@ -1219,5 +1406,6 @@ module.exports = {
   createPgRepository,
   createSkillAtlasServer,
   normalizePackagePath,
-  validatePackage
+  validatePackage,
+  validateWorkflowCloudPackage
 };

@@ -7,7 +7,8 @@ const { createHash } = require('node:crypto');
 const {
   computeVersionHash,
   createSkillAtlasServer,
-  validatePackage
+  validatePackage,
+  validateWorkflowCloudPackage
 } = require('../src/cloud-api');
 
 function createPackage(name = 'demo-skill', visibility = 'private') {
@@ -33,6 +34,28 @@ function createPackage(name = 'demo-skill', visibility = 'private') {
   };
 }
 
+function createWorkflowPackage(name = '发布流程') {
+  return {
+    workflowPackage: {
+      format: 'skill-packer/workflow-package',
+      schemaVersion: 1,
+      workflow: {
+        name,
+        purpose: '完成内容发布',
+        entrySkillName: 'workflow-publish',
+        steps: [{
+          position: 1,
+          skillName: 'alpha',
+          folderName: 'alpha',
+          versionHash: 'a'.repeat(64),
+          relation: 'then',
+          instruction: ''
+        }]
+      }
+    }
+  };
+}
+
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -43,6 +66,8 @@ function createMemoryRepository() {
   const loginStates = new Map();
   const skills = new Map();
   const packages = new Map();
+  const workflowMetadata = new Map();
+  const workflowPackages = new Map();
 
   return {
     async health() {},
@@ -127,6 +152,38 @@ function createMemoryRepository() {
       packages.delete(id);
       return true;
     },
+    async listWorkflows(userId) {
+      return [...workflowMetadata.values()].filter((workflow) => workflow.ownerId === userId);
+    },
+    async saveWorkflow(user, validated) {
+      const existing = [...workflowMetadata.values()].find((workflow) => (
+        workflow.ownerId === user.id && workflow.name.toLowerCase() === validated.metadata.name.toLowerCase()
+      ));
+      const id = existing?.id || `workflow-${user.id}-${workflowMetadata.size + 1}`;
+      const versionCount = existing && existing.versionHash !== validated.metadata.versionHash
+        ? existing.versionCount + 1
+        : existing?.versionCount || 1;
+      const metadata = { ...validated.metadata, id, ownerId: user.id, versionCount };
+      workflowMetadata.set(id, metadata);
+      workflowPackages.set(id, {
+        id,
+        versionHash: metadata.versionHash,
+        updatedAt: metadata.updatedAt,
+        workflowPackage: validated.package
+      });
+      return metadata;
+    },
+    async getWorkflow(id, userId) {
+      const metadata = workflowMetadata.get(id);
+      return metadata && metadata.ownerId === userId ? workflowPackages.get(id) : null;
+    },
+    async removeWorkflow(id, userId) {
+      const metadata = workflowMetadata.get(id);
+      if (!metadata || metadata.ownerId !== userId) return false;
+      workflowMetadata.delete(id);
+      workflowPackages.delete(id);
+      return true;
+    },
     async close() {}
   };
 }
@@ -165,6 +222,16 @@ test('计算稳定版本并拒绝不安全路径', () => {
     contentBase64: Buffer.from('secret').toString('base64')
   });
   assert.throws(() => validatePackage(payload), /不安全的文件路径/);
+});
+
+test('业务流云端包生成稳定版本并拒绝伪造版本', () => {
+  const first = validateWorkflowCloudPackage(createWorkflowPackage());
+  const second = validateWorkflowCloudPackage(createWorkflowPackage());
+  assert.equal(first.metadata.versionHash, second.metadata.versionHash);
+  assert.match(first.metadata.versionHash, /^[0-9a-f]{64}$/);
+  const invalid = createWorkflowPackage();
+  invalid.workflowPackage.workflow.steps[0].versionHash = 'latest';
+  assert.throws(() => validateWorkflowCloudPackage(invalid), /有效版本/);
 });
 
 test('桌面安装包接口可用，未产出时优雅降级', async (t) => {
@@ -352,6 +419,56 @@ test('统一账号登录后按账号隔离私有 Skill，并公开社区 Skill',
     method: 'DELETE',
     headers: { Cookie: cookieB, Origin: baseUrl }
   })).status, 404);
+});
+
+test('云端业务流按账号隔离，并可保存、读取和删除固定版本', async (t) => {
+  let pendingUser = null;
+  const repository = createMemoryRepository();
+  const server = createSkillAtlasServer({
+    repository,
+    ssoAuthBaseUrl: 'https://accounts.example.test',
+    publicUrl: 'https://skills.example.test',
+    exchangeSsoCode: async () => pendingUser
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = 'http://127.0.0.1:' + server.address().port;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await repository.close();
+  });
+
+  assert.equal((await fetch(baseUrl + '/api/workflows')).status, 401);
+  pendingUser = { id: 'flow-a', email: 'flow-a@example.test', displayName: '流程用户 A', image: null };
+  const cookieA = await login(baseUrl, pendingUser);
+  const headersA = { Cookie: cookieA, Origin: baseUrl, 'Content-Type': 'application/json' };
+  const savedResponse = await fetch(baseUrl + '/api/workflows', {
+    method: 'POST',
+    headers: headersA,
+    body: JSON.stringify(createWorkflowPackage())
+  });
+  assert.equal(savedResponse.status, 201);
+  const saved = (await savedResponse.json()).workflow;
+  assert.equal(saved.stepCount, 1);
+  assert.equal(saved.versionCount, 1);
+  assert.equal(
+    (await fetch(baseUrl + '/api/workflows', { headers: { Cookie: cookieA } }).then((response) => response.json())).workflows.length,
+    1
+  );
+  const downloaded = await fetch(baseUrl + '/api/workflows/' + saved.id, { headers: { Cookie: cookieA } });
+  assert.equal(downloaded.status, 200);
+  assert.equal((await downloaded.json()).workflowPackage.workflow.name, '发布流程');
+
+  pendingUser = { id: 'flow-b', email: 'flow-b@example.test', displayName: '流程用户 B', image: null };
+  const cookieB = await login(baseUrl, pendingUser);
+  assert.equal(
+    (await fetch(baseUrl + '/api/workflows', { headers: { Cookie: cookieB } }).then((response) => response.json())).workflows.length,
+    0
+  );
+  assert.equal((await fetch(baseUrl + '/api/workflows/' + saved.id, { headers: { Cookie: cookieB } })).status, 404);
+  assert.equal((await fetch(baseUrl + '/api/workflows/' + saved.id, {
+    method: 'DELETE',
+    headers: { Cookie: cookieA, Origin: baseUrl }
+  })).status, 200);
 });
 
 test('上传 Skill 时自动生成中文简介并随下载包返回', async (t) => {

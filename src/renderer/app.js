@@ -24,6 +24,7 @@ const state = {
   cloudUser: null,
   cloudSkills: [],
   communitySkills: [],
+  workflows: { items: [], cloudItems: [], selectedId: null, draftSteps: [], projectPlan: null, lastManifest: null },
   ai: { config: null, candidates: null, preview: null, advice: null },
   unify: { preview: null, lastManifest: null }
 };
@@ -176,6 +177,7 @@ function updateCounts() {
     doubao: skills.filter((s) => s.platform === 'doubao').length,
     workbuddy: skills.filter((s) => s.platform === 'workbuddy').length,
     shared: skills.filter((s) => s.platform === 'shared').length,
+    workflows: state.workflows.items.length,
     duplicate: 0,
     unused: skills.filter((s) => !(s.usage && s.usage.total > 0)).length,
     community: state.communitySkills.length,
@@ -460,6 +462,7 @@ function setView(view) {
   state.view = view;
   $('view-catalog').hidden = view !== 'catalog';
   $('view-usage').hidden = view !== 'usage';
+  $('view-workflows').hidden = view !== 'workflows';
   $('view-ai').hidden = view !== 'ai';
   $('view-unify').hidden = view !== 'unify';
   $('view-community').hidden = view !== 'community';
@@ -473,6 +476,285 @@ function setView(view) {
     node.classList.toggle('is-active', active);
   }
   saveUiState();
+}
+
+/* ---------------- 业务流包 ---------------- */
+
+function selectedWorkflow() {
+  return state.workflows.items.find((workflow) => workflow.id === state.workflows.selectedId) || null;
+}
+
+function setWorkflowStatus(text) {
+  $('workflow-status').textContent = text;
+}
+
+function setWorkflowDraft(workflow = null) {
+  state.workflows.selectedId = workflow ? workflow.id : null;
+  state.workflows.projectPlan = null;
+  state.workflows.lastManifest = null;
+  state.workflows.draftSteps = workflow
+    ? workflow.steps.map((step) => ({ ...step }))
+    : [];
+  $('workflow-name').value = workflow ? workflow.name : '';
+  $('workflow-purpose').value = workflow ? workflow.purpose : '';
+  $('workflow-entry-name').textContent = workflow
+    ? `$${workflow.entrySkillName}${workflow.generatedAt ? ' · 已生成' : ''}`
+    : '尚未生成入口';
+  $('workflow-delete').disabled = !workflow;
+  $('workflow-export').disabled = !workflow;
+  $('workflow-export-plugin').disabled = !workflow;
+  $('workflow-cloud-push').disabled = !workflow;
+  $('workflow-project-apply').disabled = true;
+  $('workflow-project-rollback').disabled = true;
+  $('workflow-project-plan').hidden = true;
+  $('workflow-project-status').textContent = workflow && workflow.generatedAt
+    ? '调用入口已生成，可以选择项目并预览。'
+    : '先生成调用入口，再选择项目。';
+  renderWorkflows();
+}
+
+function renderWorkflowList() {
+  const list = $('workflow-list');
+  list.textContent = '';
+  $('workflow-list-empty').hidden = state.workflows.items.length > 0;
+  for (const workflow of state.workflows.items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `workflow-list-item${workflow.id === state.workflows.selectedId ? ' is-active' : ''}`;
+    const name = document.createElement('strong');
+    name.textContent = workflow.name;
+    const meta = document.createElement('span');
+    meta.textContent = `${workflow.steps.length} 个 Skill · $${workflow.entrySkillName}`;
+    button.append(name, meta);
+    button.addEventListener('click', () => setWorkflowDraft(workflow));
+    list.append(button);
+  }
+}
+
+function renderWorkflowCloudList() {
+  const list = $('workflow-cloud-list');
+  list.textContent = '';
+  const items = state.workflows.cloudItems || [];
+  const empty = $('workflow-cloud-empty');
+  empty.hidden = items.length > 0;
+  empty.textContent = state.cloudUser
+    ? (items.length ? '' : '云端还没有业务流。')
+    : '登录后可查看云端业务流。';
+  for (const workflow of items) {
+    const row = document.createElement('div');
+    row.className = 'workflow-cloud-item';
+    const info = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = workflow.name;
+    const meta = document.createElement('span');
+    meta.textContent = `${workflow.stepCount} 步 · ${workflow.versionCount} 个版本 · ${formatDate(workflow.updatedAt)}`;
+    info.append(name, meta);
+    const pull = document.createElement('button');
+    pull.type = 'button';
+    pull.className = 'ghost-button';
+    pull.textContent = '拉取';
+    pull.addEventListener('click', async () => {
+      pull.disabled = true;
+      try {
+        const imported = await window.skillPacker.workflowCloudPull(workflow.id);
+        await loadWorkflows();
+        setWorkflowDraft(state.workflows.items.find((item) => item.id === imported.id) || imported);
+        showToast('云端业务流已拉取');
+      } catch (error) {
+        showToast(`拉取失败：${error.message || error}`);
+      } finally {
+        pull.disabled = false;
+      }
+    });
+    row.append(info, pull);
+    list.append(row);
+  }
+}
+
+function renderWorkflowSkillOptions() {
+  const select = $('workflow-skill-select');
+  const current = select.value;
+  select.textContent = '';
+  const skills = [...allSkills()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-CN'));
+  if (!skills.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '尚未扫描到 Skill';
+    select.append(option);
+    return;
+  }
+  for (const skill of skills) {
+    const option = document.createElement('option');
+    option.value = skill.id;
+    option.textContent = `${skill.name} · ${skill.source || PLATFORM_NAMES[skill.platform] || '本机'}`;
+    select.append(option);
+  }
+  if (skills.some((skill) => skill.id === current)) select.value = current;
+}
+
+function moveWorkflowStep(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= state.workflows.draftSteps.length) return;
+  const [step] = state.workflows.draftSteps.splice(index, 1);
+  state.workflows.draftSteps.splice(target, 0, step);
+  state.workflows.draftSteps[0].relation = 'then';
+  renderWorkflowSteps();
+}
+
+function renderWorkflowSteps() {
+  const list = $('workflow-steps');
+  list.textContent = '';
+  $('workflow-steps-empty').hidden = state.workflows.draftSteps.length > 0;
+  state.workflows.draftSteps.forEach((step, index) => {
+    const row = document.createElement('div');
+    row.className = 'workflow-step';
+
+    const number = document.createElement('span');
+    number.className = 'workflow-step-index';
+    number.textContent = String(index + 1);
+
+    const name = document.createElement('div');
+    name.className = 'workflow-step-name';
+    const strong = document.createElement('strong');
+    strong.textContent = step.skillName;
+    const hash = document.createElement('small');
+    hash.textContent = step.versionHash ? `版本 ${step.versionHash.slice(0, 8)}` : '版本待扫描';
+    name.append(strong, hash);
+
+    const relation = document.createElement('select');
+    for (const [value, label] of [['then', index === 0 ? '起点' : '接着执行'], ['parallel', '与上一步并行'], ['optional', '按需执行']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      relation.append(option);
+    }
+    relation.value = index === 0 ? 'then' : step.relation;
+    relation.disabled = index === 0;
+    relation.addEventListener('change', () => { step.relation = relation.value; });
+
+    const instruction = document.createElement('input');
+    instruction.maxLength = 300;
+    instruction.placeholder = '本流程对这一步的补充（可选）';
+    instruction.value = step.instruction || '';
+    instruction.addEventListener('input', () => { step.instruction = instruction.value; });
+
+    const actions = document.createElement('div');
+    actions.className = 'workflow-step-actions';
+    for (const [label, title, handler, disabled] of [
+      ['↑', '上移', () => moveWorkflowStep(index, -1), index === 0],
+      ['↓', '下移', () => moveWorkflowStep(index, 1), index === state.workflows.draftSteps.length - 1],
+      ['×', '移除', () => { state.workflows.draftSteps.splice(index, 1); renderWorkflowSteps(); }, false]
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ghost-button';
+      button.textContent = label;
+      button.title = title;
+      button.disabled = disabled;
+      button.addEventListener('click', handler);
+      actions.append(button);
+    }
+
+    row.append(number, name, relation, instruction, actions);
+    list.append(row);
+  });
+}
+
+function renderWorkflows() {
+  renderWorkflowList();
+  renderWorkflowCloudList();
+  renderWorkflowSkillOptions();
+  renderWorkflowSteps();
+  renderWorkflowProjectPlan();
+  $('workflow-delete').disabled = !state.workflows.selectedId;
+  $('workflow-export').disabled = !state.workflows.selectedId;
+  $('workflow-export-plugin').disabled = !state.workflows.selectedId;
+  $('workflow-cloud-push').disabled = !state.workflows.selectedId;
+}
+
+function selectedProjectTools() {
+  const tools = [];
+  if ($('workflow-tool-codex').checked) tools.push('codex');
+  if ($('workflow-tool-claude').checked) tools.push('claude');
+  if ($('workflow-tool-cursor').checked) tools.push('cursor');
+  return tools;
+}
+
+function renderWorkflowProjectPlan() {
+  const plan = state.workflows.projectPlan;
+  const box = $('workflow-project-plan');
+  const actions = $('workflow-project-actions');
+  actions.textContent = '';
+  box.hidden = !plan;
+  $('workflow-project-apply').disabled = !plan || plan.summary.conflicts > 0;
+  if (!plan) return;
+  $('workflow-project-summary').textContent = [
+    `项目：${plan.projectRoot}`,
+    `新建链接 ${plan.summary.create}`,
+    `已存在 ${plan.summary.unchanged}`,
+    `冲突 ${plan.summary.conflicts}`
+  ].join(' ｜ ');
+  for (const action of plan.actions) {
+    const row = document.createElement('div');
+    row.className = `unify-action-group workflow-project-action${action.state === 'conflict' ? ' unify-conflict' : ''}`;
+    const name = document.createElement('strong');
+    name.textContent = action.skillName;
+    const target = document.createElement('code');
+    target.textContent = action.targetPath;
+    const status = document.createElement('span');
+    status.className = `pill ${action.state === 'conflict' ? 'pill-warn' : 'pill-personal'}`;
+    status.textContent = action.state === 'create-junction'
+      ? '将创建链接'
+      : action.state === 'unchanged' ? '已启用' : '同名冲突';
+    row.append(name, target, status);
+    actions.append(row);
+  }
+}
+
+async function loadWorkflows() {
+  const store = await window.skillPacker.workflowList();
+  state.workflows.items = store.workflows || [];
+  const selected = selectedWorkflow();
+  if (state.workflows.selectedId && !selected) setWorkflowDraft(null);
+  else renderWorkflows();
+}
+
+async function loadCloudWorkflows() {
+  if (!state.cloudUser) {
+    state.workflows.cloudItems = [];
+    renderWorkflowCloudList();
+    return;
+  }
+  $('workflow-cloud-empty').hidden = false;
+  $('workflow-cloud-empty').textContent = '正在读取云端业务流…';
+  try {
+    state.workflows.cloudItems = await window.skillPacker.workflowCloudList();
+  } catch (error) {
+    state.workflows.cloudItems = [];
+    const message = error.message || String(error);
+    if (message.includes('接口不存在')) {
+      renderWorkflowCloudList();
+      $('workflow-cloud-empty').textContent = '当前云端服务尚未升级业务流接口。';
+      return;
+    }
+    showToast(`读取云端业务流失败：${message}`);
+  }
+  renderWorkflowCloudList();
+}
+
+async function saveWorkflowDraft() {
+  const payload = {
+    id: state.workflows.selectedId,
+    name: $('workflow-name').value,
+    purpose: $('workflow-purpose').value,
+    steps: state.workflows.draftSteps
+  };
+  const saved = await window.skillPacker.workflowSave(payload);
+  const index = state.workflows.items.findIndex((item) => item.id === saved.id);
+  if (index >= 0) state.workflows.items[index] = saved;
+  else state.workflows.items.unshift(saved);
+  setWorkflowDraft(saved);
+  return saved;
 }
 
 /* ---------------- 统一技能库 ---------------- */
@@ -765,8 +1047,10 @@ async function logoutCloudAccount() {
   state.cloudUser = null;
   state.cloudSkills = [];
   state.communitySkills = [];
+  state.workflows.cloudItems = [];
   renderCommunity();
   renderCloud();
+  renderWorkflowCloudList();
   updateCounts();
   showToast('已退出登录');
 }
@@ -1196,10 +1480,11 @@ function render() {
   renderScopeOptions();
   renderCatalog();
   renderUsageDashboard();
+  renderWorkflows();
   renderCommunity();
   renderCloud();
   renderAi();
-  setView(['catalog', 'usage', 'ai', 'unify', 'community', 'cloud'].includes(state.view) ? state.view : 'catalog');
+  setView(['catalog', 'usage', 'workflows', 'ai', 'unify', 'community', 'cloud'].includes(state.view) ? state.view : 'catalog');
 }
 
 async function scan() {
@@ -1230,6 +1515,10 @@ function bindEvents() {
       if (view === 'catalog') state.scope = node.getAttribute('data-scope');
       setView(view);
       renderCatalog();
+      if (view === 'workflows') {
+        renderWorkflows();
+        void loadCloudWorkflows();
+      }
       if (view === 'community') void loadCommunity();
       if (view === 'cloud') void loadCloud();
       saveUiState();
@@ -1273,6 +1562,222 @@ function bindEvents() {
       if (file) showToast('清单已导出（不含脚本内容）');
     } catch (error) {
       showToast(`导出失败：${error.message || error}`);
+    }
+  });
+
+  $('workflow-new').addEventListener('click', () => {
+    setWorkflowDraft(null);
+    setWorkflowStatus('正在新建业务流。先添加 Skill，再保存。');
+    $('workflow-name').focus();
+  });
+
+  $('workflow-import').addEventListener('click', async () => {
+    const button = $('workflow-import');
+    button.disabled = true;
+    try {
+      const imported = await window.skillPacker.workflowImport();
+      if (!imported) return;
+      state.workflows.items.unshift(imported);
+      setWorkflowDraft(imported);
+      setWorkflowStatus(`已导入「${imported.name}」，依赖与版本均已核对。`);
+      showToast('业务流包已导入');
+    } catch (error) {
+      showToast(`导入失败：${error.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('workflow-add-skill').addEventListener('click', () => {
+    const skill = allSkills().find((item) => item.id === $('workflow-skill-select').value);
+    if (!skill) return;
+    state.workflows.draftSteps.push({
+      id: '',
+      skillId: skill.id,
+      skillName: skill.name,
+      folderName: skill.folderName || skill.name,
+      versionHash: skill.versionHash || '',
+      relation: state.workflows.draftSteps.length ? 'then' : 'then',
+      instruction: ''
+    });
+    renderWorkflowSteps();
+  });
+
+  $('workflow-save').addEventListener('click', async () => {
+    const button = $('workflow-save');
+    button.disabled = true;
+    try {
+      const saved = await saveWorkflowDraft();
+      setWorkflowStatus(`已保存「${saved.name}」：${saved.steps.length} 个 Skill，只保存引用与版本。`);
+      showToast('业务流已保存');
+    } catch (error) {
+      showToast(`保存失败：${error.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('workflow-generate').addEventListener('click', async () => {
+    const button = $('workflow-generate');
+    button.disabled = true;
+    button.textContent = '正在生成…';
+    try {
+      const saved = await saveWorkflowDraft();
+      const result = await window.skillPacker.workflowGenerate(saved.id);
+      state.scan = result.scan;
+      await loadWorkflows();
+      setWorkflowDraft(state.workflows.items.find((item) => item.id === saved.id) || saved);
+      setWorkflowStatus(`调用入口已生成：$${saved.entrySkillName}。以后只需调用这一个 Skill。`);
+      showToast(`已生成 $${saved.entrySkillName}`);
+      render();
+    } catch (error) {
+      showToast(`生成失败：${error.message || error}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = '生成单一调用入口';
+    }
+  });
+
+  $('workflow-export').addEventListener('click', async () => {
+    const workflow = selectedWorkflow();
+    if (!workflow) return;
+    const button = $('workflow-export');
+    button.disabled = true;
+    try {
+      const filePath = await window.skillPacker.workflowExport(workflow.id);
+      if (filePath) showToast('业务流包已导出，不含本机路径和 Skill 正文');
+    } catch (error) {
+      showToast(`导出失败：${error.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('workflow-export-plugin').addEventListener('click', async () => {
+    const workflow = selectedWorkflow();
+    if (!workflow) return;
+    const button = $('workflow-export-plugin');
+    button.disabled = true;
+    try {
+      const result = await window.skillPacker.workflowExportPlugin(workflow.id);
+      if (result) {
+        setWorkflowStatus(`Codex Plugin 已导出：${result.destination}`);
+        showToast(`已导出 Plugin，包含 ${result.skillCount} 个 Skill`);
+      }
+    } catch (error) {
+      showToast(`Plugin 导出失败：${error.message || error}`);
+    } finally {
+      button.disabled = !state.workflows.selectedId;
+    }
+  });
+
+  $('workflow-cloud-push').addEventListener('click', async () => {
+    const workflow = selectedWorkflow();
+    if (!workflow) return;
+    if (!state.cloudUser) {
+      showToast('请先在「云同步」登录');
+      return;
+    }
+    const button = $('workflow-cloud-push');
+    button.disabled = true;
+    try {
+      const saved = await window.skillPacker.workflowCloudPush(workflow.id);
+      await loadCloudWorkflows();
+      setWorkflowStatus(`已保存到云端，固定版本 ${saved.versionHash.slice(0, 8)}。`);
+      showToast('业务流已保存到云端');
+    } catch (error) {
+      showToast(`云端保存失败：${error.message || error}`);
+    } finally {
+      button.disabled = !state.workflows.selectedId;
+    }
+  });
+
+  $('workflow-cloud-refresh').addEventListener('click', async () => {
+    await loadCloudWorkflows();
+  });
+
+  $('workflow-project-preview').addEventListener('click', async () => {
+    const workflow = selectedWorkflow();
+    if (!workflow) {
+      showToast('请先保存业务流');
+      return;
+    }
+    const tools = selectedProjectTools();
+    if (!tools.length) {
+      showToast('至少选择一个目标 Agent');
+      return;
+    }
+    const button = $('workflow-project-preview');
+    button.disabled = true;
+    try {
+      const plan = await window.skillPacker.workflowProjectPreview({ workflowId: workflow.id, tools });
+      if (!plan) return;
+      state.workflows.projectPlan = plan;
+      renderWorkflowProjectPlan();
+      $('workflow-project-status').textContent = plan.summary.conflicts
+        ? `发现 ${plan.summary.conflicts} 个同名冲突，已阻止执行。请先处理项目内目录。`
+        : '预览完成。确认后才会在项目目录创建 Junction。';
+    } catch (error) {
+      showToast(`项目预览失败：${error.message || error}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('workflow-project-apply').addEventListener('click', async () => {
+    const plan = state.workflows.projectPlan;
+    if (!plan) return;
+    const button = $('workflow-project-apply');
+    button.disabled = true;
+    button.textContent = '正在启用…';
+    try {
+      const result = await window.skillPacker.workflowProjectApply(plan.planId);
+      state.workflows.lastManifest = result.manifestPath;
+      state.workflows.projectPlan = null;
+      renderWorkflowProjectPlan();
+      $('workflow-project-rollback').disabled = false;
+      $('workflow-project-status').textContent = `已启用到项目：新建 ${result.manifest.createdJunctions.length} 个链接。`;
+      showToast('业务流已启用到项目');
+    } catch (error) {
+      showToast(`启用失败：${error.message || error}`);
+    } finally {
+      button.disabled = !state.workflows.projectPlan;
+      button.textContent = '确认启用到项目';
+    }
+  });
+
+  $('workflow-project-rollback').addEventListener('click', async () => {
+    if (!state.workflows.lastManifest) return;
+    const button = $('workflow-project-rollback');
+    button.disabled = true;
+    try {
+      await window.skillPacker.workflowProjectRollback(state.workflows.lastManifest);
+      state.workflows.lastManifest = null;
+      $('workflow-project-status').textContent = '已回滚本次项目启用；中央正本和子 Skill 未改动。';
+      showToast('项目环境已回滚');
+    } catch (error) {
+      button.disabled = false;
+      showToast(`回滚失败：${error.message || error}`);
+    }
+  });
+
+  $('workflow-delete').addEventListener('click', async () => {
+    const workflow = selectedWorkflow();
+    if (!workflow || !window.confirm(`删除业务流「${workflow.name}」及它生成的调用入口？子 Skill 不会被删除。`)) return;
+    const button = $('workflow-delete');
+    button.disabled = true;
+    try {
+      const result = await window.skillPacker.workflowDelete(workflow.id);
+      if (result.scan) state.scan = result.scan;
+      await loadWorkflows();
+      setWorkflowDraft(null);
+      setWorkflowStatus('业务流入口已删除，所有子 Skill 保持不变。');
+      showToast('业务流已删除');
+      render();
+    } catch (error) {
+      showToast(`删除失败：${error.message || error}`);
+    } finally {
+      button.disabled = !state.workflows.selectedId;
     }
   });
 
@@ -1583,6 +2088,11 @@ function bindEvents() {
 async function boot() {
   applyUiState();
   bindEvents();
+  // 本地列表不等待云端登录检查和其他面板初始化。
+  const workflowsReady = loadWorkflows().catch(() => {
+    state.workflows.items = [];
+  });
+  const initialScan = scan().then(render);
   try {
     $('app-version').textContent = `v${await window.skillPacker.version()}`;
   } catch {
@@ -1608,8 +2118,9 @@ async function boot() {
         : `检测到未完整执行的统一记录（${status.status}），可按 manifest 恢复。`);
     }
   } catch { /* 没有历史统一记录 */ }
-  await scan();
+  await Promise.all([initialScan, workflowsReady]);
   render();
+  if (state.cloudUser && state.view === 'workflows') await loadCloudWorkflows();
   if (state.view === 'community') await loadCommunity();
   if (state.view === 'cloud') await loadCloud();
 }

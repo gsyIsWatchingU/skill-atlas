@@ -182,6 +182,30 @@ async function setVisibility({ id, visibility }) {
   return data.skill;
 }
 
+async function listCloudWorkflows() {
+  const auth = await readAuth();
+  if (!auth || !auth.token) throw new Error('未登录');
+  const data = await callApi('/api/workflows', { auth });
+  return data.workflows || [];
+}
+
+async function uploadWorkflowPackage(workflowPackage) {
+  const auth = await readAuth();
+  if (!auth || !auth.token) throw new Error('未登录');
+  const data = await callApi('/api/workflows', {
+    method: 'POST',
+    auth,
+    body: { workflowPackage }
+  });
+  return data.workflow;
+}
+
+async function downloadWorkflowPackage(id) {
+  const auth = await readAuth();
+  if (!auth || !auth.token) throw new Error('未登录');
+  return callApi(`/api/workflows/${encodeURIComponent(id)}`, { auth });
+}
+
 module.exports = {
   DEFAULT_API_BASE,
   login,
@@ -190,5 +214,8 @@ module.exports = {
   listCloud,
   uploadLocalSkill,
   downloadCloudSkill,
-  setVisibility
+  setVisibility,
+  listCloudWorkflows,
+  uploadWorkflowPackage,
+  downloadWorkflowPackage
 };

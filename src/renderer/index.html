@@ -25,6 +25,9 @@
         <button class="nav-item" data-view="usage" data-scope="usage" type="button">
           <span>使用分析</span><span class="nav-count" data-count="usage">0</span>
         </button>
+        <button class="nav-item" data-view="workflows" type="button">
+          <span>业务流</span><span class="nav-count" data-count="workflows">0</span>
+        </button>
         <button class="nav-item" data-view="catalog" data-scope="codex" type="button">
           <span>Codex</span><span class="nav-count" data-count="codex">0</span>
         </button>
@@ -166,6 +169,100 @@
           <ul class="unused-list" id="unused-list"></ul>
         </div>
       </section>
+
+      <section id="view-workflows" class="view" hidden>
+        <div class="workflow-layout">
+          <aside class="panel workflow-sidebar">
+            <div class="workflow-panel-head">
+              <div>
+                <h2 class="panel-title">业务流</h2>
+                <p class="panel-note">一次调用，组合多个 Skill。</p>
+              </div>
+              <div class="workflow-mini-actions">
+                <button id="workflow-import" class="ghost-button" type="button">导入</button>
+                <button id="workflow-new" class="ghost-button" type="button">新建</button>
+              </div>
+            </div>
+            <div id="workflow-list" class="workflow-list"></div>
+            <p id="workflow-list-empty" class="panel-empty">还没有业务流。</p>
+            <div class="workflow-cloud-head">
+              <strong>云端业务流</strong>
+              <button id="workflow-cloud-refresh" class="ghost-button" type="button">刷新</button>
+            </div>
+            <div id="workflow-cloud-list" class="workflow-list"></div>
+            <p id="workflow-cloud-empty" class="panel-empty">登录后可查看云端业务流。</p>
+          </aside>
+
+          <div class="panel workflow-editor">
+            <div class="workflow-panel-head">
+              <div>
+                <h2 class="panel-title">工作流包组装器</h2>
+                <p class="panel-note">只保存引用，不复制子 Skill。ABCD 与 CDEF 可以复用同一份 C、D。</p>
+              </div>
+              <span id="workflow-entry-name" class="pill pill-personal">尚未生成入口</span>
+            </div>
+
+            <div class="workflow-fields">
+              <label class="field">
+                <span>业务流名称</span>
+                <input id="workflow-name" maxlength="80" placeholder="例如：小红书发布流">
+              </label>
+              <label class="field workflow-purpose-field">
+                <span>用途</span>
+                <textarea id="workflow-purpose" maxlength="500" rows="2" placeholder="这条业务流解决什么问题"></textarea>
+              </label>
+            </div>
+
+            <div class="workflow-add-row">
+              <label class="field workflow-skill-picker">
+                <span>添加 Skill</span>
+                <select id="workflow-skill-select"></select>
+              </label>
+              <button id="workflow-add-skill" class="ghost-button" type="button">加入流程</button>
+            </div>
+
+            <div class="workflow-sequence-head">
+              <strong>组合步骤</strong>
+              <span>支持接着执行、并行、按需三种关系</span>
+            </div>
+            <div id="workflow-steps" class="workflow-steps"></div>
+            <p id="workflow-steps-empty" class="panel-empty">从上方选择 Skill 加入流程。</p>
+
+            <div class="workflow-actions">
+              <button id="workflow-save" class="ghost-button" type="button">保存业务流</button>
+              <button id="workflow-generate" class="primary-button" type="button">生成单一调用入口</button>
+              <button id="workflow-export" class="ghost-button" type="button" disabled>导出业务流包</button>
+              <button id="workflow-export-plugin" class="ghost-button" type="button" disabled>导出 Codex Plugin</button>
+              <button id="workflow-cloud-push" class="ghost-button" type="button" disabled>保存到云端</button>
+              <button id="workflow-delete" class="danger-button" type="button" disabled>删除</button>
+            </div>
+            <p id="workflow-status" class="catalog-hint">保存后可生成 <code>$workflow-名称</code>，调用时无需再手动选择多个 Skill。</p>
+
+            <section class="workflow-project">
+              <div class="workflow-sequence-head">
+                <strong>启用到项目</strong>
+                <span>逐 Skill 建立 Junction，不复制正本</span>
+              </div>
+              <div class="workflow-tool-row">
+                <label><input id="workflow-tool-codex" type="checkbox" checked> Codex</label>
+                <label><input id="workflow-tool-claude" type="checkbox"> Claude Code</label>
+                <label><input id="workflow-tool-cursor" type="checkbox"> Cursor</label>
+              </div>
+              <div class="workflow-actions">
+                <button id="workflow-project-preview" class="ghost-button" type="button">选择项目并预览</button>
+                <button id="workflow-project-apply" class="primary-button" type="button" disabled>确认启用到项目</button>
+                <button id="workflow-project-rollback" class="ghost-button" type="button" disabled>回滚本次启用</button>
+              </div>
+              <p id="workflow-project-status" class="catalog-hint">先生成调用入口，再选择项目。</p>
+              <div id="workflow-project-plan" class="workflow-project-plan" hidden>
+                <p id="workflow-project-summary" class="unify-summary"></p>
+                <div id="workflow-project-actions" class="unify-actions"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
       <section id="view-ai" class="view" hidden>
         <div class="panel ai-panel">
           <div class="ai-head">

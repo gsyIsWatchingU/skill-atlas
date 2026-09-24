@@ -25,6 +25,9 @@ const { createHash, randomUUID } = require('node:crypto');
 const scanner = require('./scanner');
 const cloud = require('./cloud-client');
 const translator = require('./translator');
+const workflows = require('./workflows');
+const projectEnvironments = require('./project-environments');
+const pluginExport = require('./plugin-export');
 const { findDuplicateCandidates } = require('./ai/candidates');
 const { buildPayload, describePayload } = require('./ai/payload');
 const { buildPrompt, parseAdvice } = require('./ai/advice');
@@ -65,9 +68,21 @@ let mainWindow = null;
 let lastScan = null;
 /** 最近一次统一预览；执行时必须重新扫描并校验签名，防止按过期计划动盘。 */
 let pendingUnify = null;
+/** 最近一次项目环境预览；执行时重新核对目标状态。 */
+let pendingProjectApply = null;
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function workflowsPath() {
+  return path.join(app.getPath('userData'), 'workflows.json');
+}
+
+/** 中央目录（~/.agents/skills）的绝对路径；未扫描过时返回 null。 */
+function getCentralDir() {
+  const root = (lastScan && lastScan.roots || []).find((r) => r.id === 'shared-agents');
+  return root ? root.path : null;
 }
 
 function resolvedRoots(settings) {
@@ -225,6 +240,176 @@ function registerIpc() {
     const settings = await readSettings(settingsPath());
     lastScan = await runScan(settings);
     return lastScan;
+  });
+
+  /* ---------------- 工作流包 ---------------- */
+
+  ipcMain.handle('workflows:list', async () => {
+    return workflows.readWorkflowStore(workflowsPath());
+  });
+
+  ipcMain.handle('workflows:save', async (_event, payload) => {
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const byId = new Map(lastScan.skills.map((skill) => [skill.id, skill]));
+    const steps = Array.isArray(payload && payload.steps) ? payload.steps : [];
+    const authoritativeSteps = steps.map((step, index) => {
+      const skill = byId.get(String(step && step.skillId || ''));
+      if (!skill) throw new Error(`第 ${index + 1} 步引用的 Skill 不在当前扫描结果中`);
+      return {
+        id: step.id,
+        skillId: skill.id,
+        skillName: skill.name,
+        folderName: skill.folderName || skill.name,
+        versionHash: skill.versionHash || '',
+        relation: step.relation,
+        instruction: step.instruction
+      };
+    });
+    return workflows.saveWorkflow(workflowsPath(), { ...payload, steps: authoritativeSteps });
+  });
+
+  ipcMain.handle('workflows:generate', async (_event, workflowId) => {
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const centralRootPath = getCentralDir();
+    if (!centralRootPath) throw new Error('找不到中央 Skill 目录，请先完成技能统一');
+    const result = await workflows.generateWorkflowSkill({
+      filePath: workflowsPath(),
+      workflowId: String(workflowId || ''),
+      centralRootPath,
+      skills: lastScan.skills
+    });
+    const settings = await readSettings(settingsPath());
+    lastScan = await runScan(settings);
+    return { workflow: result.workflow, entryPath: result.entryPath, scan: lastScan };
+  });
+
+  ipcMain.handle('workflows:delete', async (_event, workflowId) => {
+    const deleted = await workflows.deleteWorkflow(
+      workflowsPath(),
+      String(workflowId || ''),
+      getCentralDir() || ''
+    );
+    if (deleted) {
+      const settings = await readSettings(settingsPath());
+      lastScan = await runScan(settings);
+    }
+    return { deleted, scan: lastScan };
+  });
+
+  ipcMain.handle('workflows:export', async (_event, workflowId) => {
+    if (!mainWindow) return null;
+    const store = await workflows.readWorkflowStore(workflowsPath());
+    const workflow = store.workflows.find((item) => item.id === String(workflowId || ''));
+    if (!workflow) throw new Error('业务流不存在或已被删除');
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      title: '导出业务流包',
+      defaultPath: `${workflow.entrySkillName}.skill-workflow.json`,
+      filters: [{ name: 'Skill Packer 业务流包', extensions: ['json'] }]
+    });
+    if (picked.canceled || !picked.filePath) return null;
+    const payload = workflows.exportWorkflowPackage(workflow);
+    await fs.writeFile(picked.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    return picked.filePath;
+  });
+
+  ipcMain.handle('workflows:export-plugin', async (_event, workflowId) => {
+    if (!mainWindow) return null;
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const store = await workflows.readWorkflowStore(workflowsPath());
+    const workflow = store.workflows.find((item) => item.id === String(workflowId || ''));
+    if (!workflow) throw new Error('业务流不存在或已被删除');
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 Codex Plugin 导出目录',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (picked.canceled || !picked.filePaths.length) return null;
+    return pluginExport.exportWorkflowPlugin({
+      workflow,
+      skills: lastScan.skills,
+      targetParent: picked.filePaths[0]
+    });
+  });
+
+  ipcMain.handle('workflows:import', async () => {
+    if (!mainWindow) return null;
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '导入业务流包',
+      properties: ['openFile'],
+      filters: [{ name: 'Skill Packer 业务流包', extensions: ['json'] }]
+    });
+    if (picked.canceled || !picked.filePaths.length) return null;
+    const filePath = picked.filePaths[0];
+    const stat = await fs.stat(filePath);
+    if (stat.size > 1024 * 1024) throw new Error('业务流包不能超过 1 MB');
+    const payload = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    return workflows.importWorkflowPackage(workflowsPath(), payload, lastScan.skills);
+  });
+
+  ipcMain.handle('workflows:project:preview', async (_event, payload) => {
+    if (!mainWindow) return null;
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const store = await workflows.readWorkflowStore(workflowsPath());
+    const workflow = store.workflows.find((item) => item.id === String(payload && payload.workflowId || ''));
+    if (!workflow) throw new Error('业务流不存在或已被删除');
+    const centralRootPath = getCentralDir();
+    if (!centralRootPath) throw new Error('找不到中央 Skill 目录');
+    const entryPath = path.join(centralRootPath, workflow.entrySkillName);
+    const marker = JSON.parse(await fs.readFile(path.join(entryPath, 'workflow.json'), 'utf8').catch((error) => {
+      if (error.code === 'ENOENT') throw new Error('请先生成单一调用入口，再启用到项目');
+      throw error;
+    }));
+    if (marker.workflowId !== workflow.id) throw new Error('调用入口与当前业务流不匹配，请重新生成');
+
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: '选择要启用业务流的项目目录',
+      properties: ['openDirectory']
+    });
+    if (picked.canceled || !picked.filePaths.length) return null;
+    const plan = await projectEnvironments.buildProjectPlan({
+      workflow,
+      resolvedSteps: workflows.resolveWorkflowSteps(workflow, lastScan.skills),
+      entryPath,
+      projectRoot: picked.filePaths[0],
+      tools: payload && payload.tools
+    });
+    pendingProjectApply = plan;
+    return plan;
+  });
+
+  ipcMain.handle('workflows:project:apply', async (_event, planId) => {
+    if (!pendingProjectApply || pendingProjectApply.planId !== String(planId || '')) {
+      throw new Error('项目环境预览已失效，请重新选择项目');
+    }
+    const result = await projectEnvironments.applyProjectPlan(pendingProjectApply);
+    pendingProjectApply = null;
+    return result;
+  });
+
+  ipcMain.handle('workflows:project:rollback', async (_event, manifestPath) => {
+    return projectEnvironments.rollbackProjectApply(String(manifestPath || ''));
+  });
+
+  ipcMain.handle('workflows:cloud:list', async () => {
+    return cloud.listCloudWorkflows();
+  });
+
+  ipcMain.handle('workflows:cloud:push', async (_event, workflowId) => {
+    const store = await workflows.readWorkflowStore(workflowsPath());
+    const workflow = store.workflows.find((item) => item.id === String(workflowId || ''));
+    if (!workflow) throw new Error('业务流不存在或已被删除');
+    return cloud.uploadWorkflowPackage(workflows.exportWorkflowPackage(workflow));
+  });
+
+  ipcMain.handle('workflows:cloud:pull', async (_event, workflowId) => {
+    if (!lastScan) throw new Error('请先完成一次 Skill 扫描');
+    const downloaded = await cloud.downloadWorkflowPackage(String(workflowId || ''));
+    return workflows.importWorkflowPackage(
+      workflowsPath(),
+      downloaded.workflowPackage,
+      lastScan.skills,
+      { replaceByName: true }
+    );
   });
 
   // 打开 SKILL.md：只允许打开本机文件路径，且必须落在某个扫描根里

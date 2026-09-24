@@ -23,6 +23,21 @@ contextBridge.exposeInMainWorld('skillPacker', {
   scan: () => ipcRenderer.invoke('skills:scan'),
   exportInventory: () => ipcRenderer.invoke('skills:export'),
 
+  // 工作流包：引用多个 Skill，生成一个可直接调用的组合入口
+  workflowList: () => ipcRenderer.invoke('workflows:list'),
+  workflowSave: (payload) => ipcRenderer.invoke('workflows:save', payload),
+  workflowGenerate: (workflowId) => ipcRenderer.invoke('workflows:generate', workflowId),
+  workflowDelete: (workflowId) => ipcRenderer.invoke('workflows:delete', workflowId),
+  workflowExport: (workflowId) => ipcRenderer.invoke('workflows:export', workflowId),
+  workflowExportPlugin: (workflowId) => ipcRenderer.invoke('workflows:export-plugin', workflowId),
+  workflowImport: () => ipcRenderer.invoke('workflows:import'),
+  workflowProjectPreview: (payload) => ipcRenderer.invoke('workflows:project:preview', payload),
+  workflowProjectApply: (planId) => ipcRenderer.invoke('workflows:project:apply', planId),
+  workflowProjectRollback: (manifestPath) => ipcRenderer.invoke('workflows:project:rollback', manifestPath),
+  workflowCloudList: () => ipcRenderer.invoke('workflows:cloud:list'),
+  workflowCloudPush: (workflowId) => ipcRenderer.invoke('workflows:cloud:push', workflowId),
+  workflowCloudPull: (workflowId) => ipcRenderer.invoke('workflows:cloud:pull', workflowId),
+
   addRoot: () => ipcRenderer.invoke('roots:add'),
   removeRoot: (rootId) => ipcRenderer.invoke('roots:remove', rootId),
 
